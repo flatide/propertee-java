@@ -265,4 +265,4 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+This project is licensed under the [BSD 3-Clause License](LICENSE).
