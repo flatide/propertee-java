@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'antlr'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    antlr 'org.antlr:antlr4:4.13.1'
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+generateGrammarSource {
+    arguments += ['-visitor', '-no-listener', '-package', 'com.propertee.parser']
+    outputDirectory = file("${project.buildDir}/generated-src/antlr/main")
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs += "${project.buildDir}/generated-src/antlr/main"
+        }
+    }
+}
+
+compileJava.dependsOn generateGrammarSource
+
+application {
+    mainClass = 'com.propertee.cli.Main'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'com.propertee.cli.Main'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+run {
+    standardInput = System.in
+}
+
+test {
+    testLogging {
+        events "passed", "failed", "skipped"
+        exceptionFormat "full"
+    }
+}
