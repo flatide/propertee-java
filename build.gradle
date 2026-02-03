@@ -14,9 +14,9 @@ repositories {
 }
 
 dependencies {
-    antlr 'org.antlr:antlr4:4.13.1'
-    implementation 'org.antlr:antlr4-runtime:4.13.1'
-    implementation 'com.google.code.gson:gson:2.10.1'
+    antlr 'org.antlr:antlr4:4.9.3'
+    implementation 'org.antlr:antlr4-runtime:4.9.3'
+    implementation 'com.google.code.gson:gson:2.8.9'
     testImplementation 'junit:junit:4.13.2'
 }
 
@@ -51,6 +51,59 @@ jar {
 
 run {
     standardInput = System.in
+}
+
+// --- Dual Java 7 / Java 8 fat JAR tasks ---
+
+def jdk7Home = '/Library/Java/JavaVirtualMachines/jdk1.7.0_71.jdk/Contents/Home'
+def jdk8Home = '/Library/Java/JavaVirtualMachines/jdk1.8.0_162.jdk/Contents/Home'
+
+// Compile with JDK 8's javac targeting Java 7 bytecode, using JDK 7's rt.jar as bootclasspath
+task compileJava7(type: JavaCompile) {
+    dependsOn generateGrammarSource
+    source = sourceSets.main.java.srcDirs
+    classpath = configurations.runtimeClasspath
+    destinationDirectory = file("${buildDir}/classes/java7")
+    sourceCompatibility = '1.7'
+    targetCompatibility = '1.7'
+    options.fork = true
+    options.forkOptions.javaHome = file(jdk8Home)
+    options.bootstrapClasspath = files("${jdk7Home}/jre/lib/rt.jar")
+    options.encoding = 'UTF-8'
+}
+
+task jar7(type: Jar) {
+    dependsOn compileJava7
+    archiveBaseName = 'propertee-java'
+    archiveClassifier = 'java7'
+    manifest {
+        attributes 'Main-Class': 'com.propertee.cli.Main'
+    }
+    from compileJava7.destinationDirectory
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+task jar8(type: Jar) {
+    dependsOn classes
+    archiveBaseName = 'propertee-java'
+    archiveClassifier = 'java8'
+    manifest {
+        attributes 'Main-Class': 'com.propertee.cli.Main'
+    }
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+task jarAll {
+    dependsOn jar7, jar8
+    description = 'Build both Java 7 and Java 8 fat JARs'
+    group = 'build'
 }
 
 test {
