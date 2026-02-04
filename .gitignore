@@ -11,8 +11,5 @@ build/
 .classpath
 .settings/
 
-# Distribution
-dist/
-
 # OS
 .DS_Store
