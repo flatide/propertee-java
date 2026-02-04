@@ -1,6 +1,8 @@
-# ProperTee Java
+# ProperTee for Java
 
-A concurrent DSL interpreter for Java, ported from the JavaScript-based [propertee-concurrent](https://github.com/nicholasgasior/propertee-concurrent) project. Uses ANTLR4 for parsing and a cooperative multithreading model based on a Stepper interface pattern with round-robin scheduling.
+A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
+
+For language specification, syntax reference, and built-in functions, see the [ProperTee Language Home](https://github.com/flatide/ProperTee).
 
 **Runtime compatibility:** Java 7+ (no lambdas, no streams, no Java 8 APIs)
 
@@ -30,46 +32,43 @@ java -jar build/libs/propertee-java-java8.jar
 ./test_all.sh all   # Run integration tests against both JARs
 ```
 
-## Language Overview
+## How the Stepper Pattern Works
 
-```
-// Variables and expressions
-name = "ProperTee"
-count = 10 + 5
+The `Stepper` interface replaces JavaScript's `function*`/`yield` pattern:
 
-// Functions
-function greet(who) do
-    return "Hello, " + who
-end
+- **Statement visitors** return multi-step Steppers that yield `StepResult.BOUNDARY` between statements — the scheduler can switch threads here
+- **Expression visitors** evaluate eagerly via `eval()` — expressions are atomic
+- Threads communicate with the scheduler via `StepResult.command()` (`SLEEP`, `SPAWN_THREADS`)
 
-// Thread functions (for parallel execution)
-thread worker(id, data) do
-    PRINT("Worker " + id + " processing")
-    return LEN(data)
-end
+Thread functions are **pure** with respect to global state:
+- Can read globals via a snapshot taken at `multi` block entry
+- Cannot write globals (enforced at runtime)
+- Return results via `->` syntax; results assigned only after all threads complete
+- No locks, no shared mutable state
 
-// Parallel execution with result capture
-multi
-    worker("A", items) -> resultA
-    worker("B", items) -> resultB
-monitor 100
-    PRINT("[tick] waiting...")
-end
+## External Functions & Result Pattern
 
-// Loops
-loop x < 10 do x = x + 1 end               // condition loop
-loop item in collection do PRINT(item) end   // value loop
-loop key, val in obj do PRINT(key) end       // key-value loop
+Host applications can register external functions that return result objects:
 
-// Access patterns
-obj.name          // dot access
-arr.1             // 1-based index
-obj."key name"    // quoted key
-obj.$varName      // dynamic key
-obj.$(expr)       // computed key
+```java
+interpreter.builtins.registerExternal("GET_BALANCE", new BuiltinFunction() {
+    public Object call(List<Object> args) {
+        String user = (String) args.get(0);
+        if (userExists(user)) return Result.ok(getBalance(user));
+        return Result.error("account not found");
+    }
+});
 ```
 
-Built-in functions: `PRINT`, `SUM`, `MAX`, `MIN`, `LEN`, `PUSH`, `POP`, `SHIFT`, `SPLIT`, `JOIN`, `SUBSTR`, `INDEX_OF`, `REPLACE`, `UPPER`, `LOWER`, `TRIM`, `KEYS`, `VALUES`, `HAS_KEY`, `TYPE_OF`, `TO_NUMBER`, `TO_STRING`, `SLEEP`.
+```
+// ProperTee script checks the result:
+res = GET_BALANCE("alice")
+if res.ok == true then
+    PRINT("Balance:", res.value)
+else
+    PRINT("Error:", res.value)
+end
+```
 
 ## Integrating with Legacy Java Systems
 
@@ -235,7 +234,7 @@ String status = (String) vars.get("status");
 List<Object> results = (List<Object>) vars.get("results");
 
 // Type checking
-TypeChecker.typeOf(value);    // "number", "string", "boolean", "list", "object", "null"
+TypeChecker.typeOf(value);    // "number", "string", "boolean", "list", "object"
 TypeChecker.isNumber(value);  // true for Integer or Double
 TypeChecker.formatValue(value); // human-readable string
 ```
@@ -248,7 +247,7 @@ TypeChecker.formatValue(value); // human-readable string
 | number (decimal) | `Double` |
 | string | `String` |
 | boolean | `Boolean` |
-| null | `null` |
+| empty object `{}` | `LinkedHashMap` (empty) |
 | list | `ArrayList<Object>` |
 | object | `LinkedHashMap<String, Object>` |
 
@@ -257,7 +256,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (40 test cases)
+./gradlew test           # JUnit tests (41 test cases)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs
