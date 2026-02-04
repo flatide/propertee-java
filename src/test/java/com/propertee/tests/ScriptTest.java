@@ -12,6 +12,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import com.propertee.runtime.Result;
+
 import java.io.*;
 import java.nio.charset.Charset;
 import java.nio.file.*;
@@ -54,7 +56,8 @@ public class ScriptTest {
             "29_error_loop_limit", "30_thread_local_scope", "31_error_regular_in_multi",
             "32_error_monitor_assign", "33_complex_expressions", "34_builtin_properties",
             "35_object_computed_keys", "36_function_with_loops", "37_thread_with_loops",
-            "38_many_threads", "39_escape_strings", "40_multi_after_multi"
+            "38_many_threads", "39_escape_strings", "40_multi_after_multi",
+            "41_result_pattern"
         };
 
         for (String name : testNames) {
@@ -129,6 +132,29 @@ public class ScriptTest {
             }
         } else {
             ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, 1000, "error");
+
+            // Register test external functions for test 41
+            if ("41_result_pattern".equals(testName)) {
+                visitor.builtins.registerExternal("GET_BALANCE", new BuiltinFunctions.BuiltinFunction() {
+                    @Override
+                    public Object call(List<Object> args) {
+                        String user = (String) args.get(0);
+                        if ("alice".equals(user)) return Result.ok(3000);
+                        if ("bob".equals(user)) return Result.ok(0);
+                        return Result.error("account not found");
+                    }
+                });
+                visitor.builtins.registerExternal("DIVIDE_SAFE", new BuiltinFunctions.BuiltinFunction() {
+                    @Override
+                    public Object call(List<Object> args) {
+                        double a = ((Number) args.get(0)).doubleValue();
+                        double b = ((Number) args.get(1)).doubleValue();
+                        if (b == 0) throw new RuntimeException("division by zero");
+                        return Result.ok(TypeChecker.boxNumber(a / b));
+                    }
+                });
+            }
+
             Scheduler scheduler = new Scheduler(visitor);
             Stepper mainStepper = visitor.createRootStepper(tree);
 

@@ -20,6 +20,14 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
 }
 
+sourceSets {
+    main {
+        antlr {
+            srcDirs = ["${projectDir}/grammar"]
+        }
+    }
+}
+
 generateGrammarSource {
     arguments += ['-visitor', '-no-listener', '-package', 'com.propertee.parser']
     outputDirectory = file("${project.buildDir}/generated-src/antlr/main")
@@ -103,6 +111,16 @@ task jar8(type: Jar) {
 task jarAll {
     dependsOn jar7, jar8
     description = 'Build both Java 7 and Java 8 fat JARs'
+    group = 'build'
+}
+
+task dist(type: Copy) {
+    dependsOn jar, jar7, jar8
+    from jar.archiveFile
+    from jar7.archiveFile
+    from jar8.archiveFile
+    into "${projectDir}/dist"
+    description = 'Copy all fat JARs to dist/ folder'
     group = 'build'
 }
 

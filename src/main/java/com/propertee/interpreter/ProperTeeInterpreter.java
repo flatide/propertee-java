@@ -941,7 +941,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitReturnStmt(ProperTeeParser.ReturnStmtContext ctx) {
-        Object value = ctx.expression() != null ? eval(ctx.expression()) : null;
+        Object value = ctx.expression() != null ? eval(ctx.expression()) : new LinkedHashMap<String, Object>();
         throw new ReturnException(value);
     }
 
@@ -1028,11 +1028,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     public Object visitBooleanAtom(ProperTeeParser.BooleanAtomContext ctx) {
         return "true".equals(ctx.getText());
-    }
-
-    @Override
-    public Object visitNullAtom(ProperTeeParser.NullAtomContext ctx) {
-        return null;
     }
 
     @Override
@@ -1366,7 +1361,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         // Create local scope
         Map<String, Object> localScope = new LinkedHashMap<String, Object>();
         for (int i = 0; i < params.size(); i++) {
-            localScope.put(params.get(i), i < args.size() ? args.get(i) : null);
+            localScope.put(params.get(i), i < args.size() ? args.get(i) : new LinkedHashMap<String, Object>());
         }
 
         // Push scope
@@ -1381,11 +1376,12 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
 
         try {
-            Object result = null;
             for (ProperTeeParser.StatementContext stmt : funcDef.getBody().statement()) {
-                result = eval(stmt);
+                eval(stmt);
             }
 
+            // No explicit return: result is empty object
+            Object result = new LinkedHashMap<String, Object>();
             if (isThread) {
                 Map<String, Object> localCopy = new LinkedHashMap<String, Object>(localScope);
                 Map<String, Object> wrapped = new LinkedHashMap<String, Object>();
@@ -1480,7 +1476,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
                 Map<String, Object> localScope = new LinkedHashMap<String, Object>();
                 for (int j = 0; j < params.size(); j++) {
-                    localScope.put(params.get(j), j < args.size() ? args.get(j) : null);
+                    localScope.put(params.get(j), j < args.size() ? args.get(j) : new LinkedHashMap<String, Object>());
                 }
 
                 Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);

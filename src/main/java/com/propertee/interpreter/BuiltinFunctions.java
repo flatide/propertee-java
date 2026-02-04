@@ -39,7 +39,7 @@ public class BuiltinFunctions {
                     formatted[i] = TypeChecker.formatForPrint(args.get(i));
                 }
                 stdout.print(formatted);
-                return null;
+                return new java.util.LinkedHashMap<String, Object>();
             }
         });
 
@@ -308,5 +308,24 @@ public class BuiltinFunctions {
 
     public void register(String name, BuiltinFunction func) {
         functions.put(name, func);
+    }
+
+    /**
+     * Register an external built-in function with automatic error wrapping.
+     * The function can return Result.ok(value) or Result.error(msg) explicitly,
+     * or throw an exception which is automatically caught and wrapped as
+     * {ok: false, value: "error message"}.
+     */
+    public void registerExternal(String name, final BuiltinFunction func) {
+        functions.put(name, new BuiltinFunction() {
+            @Override
+            public Object call(java.util.List<Object> args) {
+                try {
+                    return func.call(args);
+                } catch (Exception e) {
+                    return com.propertee.runtime.Result.error(e.getMessage());
+                }
+            }
+        });
     }
 }

@@ -27,7 +27,7 @@ ProperTee Java is a Java port of the ProperTee Concurrent DSL interpreter. It us
 ./gradlew run --args="sample/01_hello.pt"
 ```
 
-**After any grammar change** (`src/main/antlr/com/propertee/parser/ProperTee.g4`), run `./gradlew generateGrammarSource` to regenerate parser files.
+**After any grammar change** (`grammar/ProperTee.g4`), run `./gradlew generateGrammarSource` to regenerate parser files.
 
 **Build requirements:** JDK 8+ for building (JDK 8 required to produce Java 7 bytecode via `-source 1.7 -target 1.7`). Gradle (wrapper included). Target runtime is **Java 7 (1.7)**.
 
@@ -55,7 +55,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-There are 40 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`.
+There are 41 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`.
 
 **Sample scripts:** `sample/01_hello.pt` through `sample/16_comments.pt` cover all language features.
 
@@ -100,7 +100,8 @@ interface Stepper {
 |---|---|
 | `ProperTee.g4` | ANTLR4 grammar — defines all syntax |
 | `ProperTeeInterpreter.java` | Main visitor (~1500 lines). All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper, ParallelStepper) |
-| `BuiltinFunctions.java` | 23 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, etc.) |
+| `BuiltinFunctions.java` | 23 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, etc.). `registerExternal()` for I/O functions with result pattern |
+| `Result.java` | Helper for external function result objects: `Result.ok(value)`, `Result.error(msg)` |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning, monitor ticking |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships |
 | `ThreadState.java` | Enum: READY, RUNNING, SLEEPING, WAITING, COMPLETED, ERROR |
@@ -159,8 +160,39 @@ loop key, val in collection do ... end
 // Access patterns: obj.prop, arr.1, obj."key", obj.$var, obj.$(expr)
 ```
 
+## External Functions & Result Pattern
+
+Host applications can register external built-in functions that return result objects instead of throwing errors:
+
+```java
+// Java host registers an external function:
+interpreter.builtins.registerExternal("GET_BALANCE", new BuiltinFunction() {
+    public Object call(List<Object> args) {
+        String user = (String) args.get(0);
+        if (userExists(user)) return Result.ok(getBalance(user));
+        return Result.error("account not found");
+    }
+});
+```
+
+```
+// ProperTee script checks the result:
+res = GET_BALANCE("alice")
+if res.ok == true then
+    PRINT("Balance:", res.value)
+else
+    PRINT("Error:", res.value)
+end
+```
+
+- `Result.ok(value)` → `{ok: true, value: ...}`
+- `Result.error(message)` → `{ok: false, value: "..."}`
+- `registerExternal()` wraps the function in try-catch — thrown exceptions automatically become `{ok: false, value: "error message"}`
+- Core builtins (PRINT, SUM, LEN, etc.) return values directly and are not wrapped
+
 ## Conventions
 
+- **No null** — the language has no null keyword. Functions without `return` or with bare `return` produce `{}` (empty object). Missing function arguments default to `{}`.
 - Java 7 target compatibility (no lambdas, no streams, no Java 8 APIs — anonymous inner classes throughout). Build currently set to `-source 1.8 -target 1.8` for JDK 9+ compatibility; switch to `VERSION_1_7` when building with JDK 8.
 - `SLEEP()` returns a `SchedulerCommand` — the stepper yields it to the scheduler
 - 1-based indexing for array access (`.1` is the first element)
