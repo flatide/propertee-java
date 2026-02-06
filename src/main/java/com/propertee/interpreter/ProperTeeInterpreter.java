@@ -557,14 +557,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 for (Map<String, Object> entry : collectedResults) {
                     String varName = (String) entry.get("varName");
                     if (varName != null) {
-                        Object threadResult = entry.get("result");
-                        Object finalValue = threadResult;
-                        if (threadResult instanceof Map) {
-                            Map<?, ?> m = (Map<?, ?>) threadResult;
-                            if (m.containsKey("result")) {
-                                finalValue = m.get("result");
-                            }
-                        }
+                        Object finalValue = entry.get("result"); // Already {ok, value} Result from Scheduler
                         if (!ss.isEmpty()) {
                             ss.set(varName, finalValue);
                         } else {

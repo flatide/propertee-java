@@ -2,6 +2,7 @@ package com.propertee.scheduler;
 
 import com.propertee.interpreter.ProperTeeInterpreter;
 import com.propertee.parser.ProperTeeParser;
+import com.propertee.runtime.Result;
 import com.propertee.stepper.*;
 
 import java.util.*;
@@ -155,7 +156,20 @@ public class Scheduler {
         if (parent == null) return;
 
         if (parent.childResults != null) {
-            parent.childResults.put(childThread.id, childThread.result);
+            if (childThread.state == ThreadState.ERROR) {
+                parent.childResults.put(childThread.id, Result.error(
+                    childThread.error != null ? childThread.error.getMessage() : "Unknown thread error"));
+            } else {
+                // Unwrap {result: ...} wrapper from thread-to-thread calls, then wrap as Result
+                Object rawResult = childThread.result;
+                if (rawResult instanceof Map) {
+                    Map<?, ?> m = (Map<?, ?>) rawResult;
+                    if (m.containsKey("result")) {
+                        rawResult = m.get("result");
+                    }
+                }
+                parent.childResults.put(childThread.id, Result.ok(rawResult));
+            }
         }
 
         boolean allDone = parent.childCompleted(childThread.id);

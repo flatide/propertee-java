@@ -58,7 +58,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-There are 45 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`.
+There are 46 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -128,7 +128,7 @@ Thread functions are pure with respect to global state:
 - **Can read** globals via a snapshot taken at MULTI block entry
 - **Cannot write** globals (enforced at runtime)
 - **Can only call** other thread functions or built-in functions
-- **Return results** via `->` syntax in MULTI blocks; results assigned only after ALL threads complete
+- **Return results** via `->` syntax in MULTI blocks as Result objects: `{ok: true, value: <result>}` on success, `{ok: false, value: "<error>"}` on error. Results assigned only after ALL threads complete
 
 ### Scope Resolution
 
@@ -163,13 +163,14 @@ thread worker(name) do
     return 42
 end
 
-// Parallel execution
+// Parallel execution (results are {ok, value} objects)
 multi
     worker("A") -> resultA
     worker("B") -> resultB
 monitor 100
     PRINT("[tick]")
 end
+PRINT(resultA.value)  // access return value
 
 // Loops
 loop condition infinite do ... end
