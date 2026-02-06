@@ -57,7 +57,9 @@ public class ScriptTest {
             "32_error_monitor_assign", "33_complex_expressions", "34_builtin_properties",
             "35_object_computed_keys", "36_function_with_loops", "37_thread_with_loops",
             "38_many_threads", "39_escape_strings", "40_multi_after_multi",
-            "41_result_pattern"
+            "41_result_pattern",
+            "42_global_prefix", "43_global_prefix_error",
+            "44_global_prefix_thread", "45_global_prefix_thread_error"
         };
 
         for (String name : testNames) {

@@ -111,6 +111,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return multiResultVars;
     }
 
+    public boolean isInFunctionScope() {
+        return !getScopeStack().isEmpty();
+    }
+
     // --- Evaluate an expression node eagerly ---
     public Object eval(org.antlr.v4.runtime.tree.ParseTree ctx) {
         if (ctx == null) return null;
@@ -644,13 +648,28 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         ScopeStack ss = getScopeStack();
         Map<String, Object> vars = getVariables();
 
+        if (lvalueCtx instanceof ProperTeeParser.GlobalVarLValueContext) {
+            String varName = ((ProperTeeParser.GlobalVarLValueContext) lvalueCtx).ID().getText();
+
+            if (isInThreadContext()) {
+                throw createError(
+                    "Cannot assign to global variable '::" + varName + "' inside thread function. " +
+                    "Thread functions can only read global variables (via ::) and write to thread-local variables.",
+                    ctx);
+            }
+
+            // Write directly to globals (bypasses local scopes)
+            variables.put(varName, value);
+            return value;
+        }
+
         if (lvalueCtx instanceof ProperTeeParser.VarLValueContext) {
             String varName = ((ProperTeeParser.VarLValueContext) lvalueCtx).ID().getText();
 
             if (isInThreadContext() && ss.isEmpty()) {
                 throw createError(
                     "Cannot assign to global variable '" + varName + "' inside thread function. " +
-                    "Thread functions can only read global variables and write to thread-local variables.",
+                    "Thread functions can only read global variables (via ::) and write to thread-local variables.",
                     ctx);
             }
 
@@ -696,10 +715,23 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         ScopeStack ss = getScopeStack();
         Map<String, Object> vars = getVariables();
 
+        if (lvalueCtx instanceof ProperTeeParser.GlobalVarLValueContext) {
+            String varName = ((ProperTeeParser.GlobalVarLValueContext) lvalueCtx).ID().getText();
+            if (vars.containsKey(varName)) return vars.get(varName);
+            if (properties.containsKey(varName)) return properties.get(varName);
+            throw new ProperTeeError("Runtime Error: Global variable '" + varName + "' is not defined");
+        }
+
         if (lvalueCtx instanceof ProperTeeParser.VarLValueContext) {
             String varName = ((ProperTeeParser.VarLValueContext) lvalueCtx).ID().getText();
             Object val = ss.get(varName);
             if (val != ScopeStack.UNDEFINED) return val;
+
+            // Inside a function: plain variables are local-only
+            if (isInFunctionScope()) {
+                throw new ProperTeeError("Runtime Error: Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.");
+            }
+
             if (vars.containsKey(varName)) return vars.get(varName);
             if (properties.containsKey(varName)) return properties.get(varName);
             throw new ProperTeeError("Runtime Error: Variable '" + varName + "' is not defined");
@@ -1000,13 +1032,34 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         // 2. Multi result vars
         if (multiVars.containsKey(name)) return multiVars.get(name);
 
-        // 3. Variables (global or snapshot)
+        // Inside a function: plain variables are local-only, no fallthrough to globals
+        if (isInFunctionScope()) {
+            throw createError(
+                "Variable '" + name + "' is not defined in local scope. Use ::" + name + " to access the global variable.",
+                ctx);
+        }
+
+        // 3. Variables (global or snapshot) — top-level only
         if (vars.containsKey(name)) return vars.get(name);
 
-        // 4. Built-in properties
+        // 4. Built-in properties — top-level only
         if (properties.containsKey(name)) return properties.get(name);
 
         throw createError("Variable '" + name + "' is not defined", ctx);
+    }
+
+    @Override
+    public Object visitGlobalVarReference(ProperTeeParser.GlobalVarReferenceContext ctx) {
+        String name = ctx.ID().getText();
+        Map<String, Object> vars = getVariables();
+
+        // Global variables
+        if (vars.containsKey(name)) return vars.get(name);
+
+        // Built-in properties
+        if (properties.containsKey(name)) return properties.get(name);
+
+        throw createError("Global variable '" + name + "' is not defined", ctx);
     }
 
     @Override
@@ -1153,6 +1206,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         Object val = ss.get(varName);
         if (val != ScopeStack.UNDEFINED) return val;
+
+        // Inside a function: $key only checks local scope
+        if (isInFunctionScope()) return null;
+
         if (vars.containsKey(varName)) return vars.get(varName);
         if (properties.containsKey(varName)) return properties.get(varName);
         return null;
@@ -1518,9 +1575,28 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         Object val = ss.get(varName);
         if (val != ScopeStack.UNDEFINED) return val;
+
+        // Inside a function: plain variables are local-only
+        if (isInFunctionScope()) {
+            throw new ProperTeeError("Runtime Error: Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.");
+        }
+
         if (vars.containsKey(varName)) return vars.get(varName);
         if (properties.containsKey(varName)) return properties.get(varName);
         throw new ProperTeeError("Runtime Error: Variable '" + varName + "' is not defined");
+    }
+
+    @Override
+    public Object visitGlobalVarLValue(ProperTeeParser.GlobalVarLValueContext ctx) {
+        String varName = ctx.ID().getText();
+
+        // Global variables (always real globals, not snapshot)
+        if (variables.containsKey(varName)) return variables.get(varName);
+
+        // Built-in properties
+        if (properties.containsKey(varName)) return properties.get(varName);
+
+        throw new ProperTeeError("Runtime Error: Global variable '" + varName + "' is not defined");
     }
 
     @Override

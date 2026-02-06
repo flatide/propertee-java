@@ -58,7 +58,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-There are 41 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`.
+There are 45 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -132,7 +132,13 @@ Thread functions are pure with respect to global state:
 
 ### Scope Resolution
 
-Variable lookup order: local scopes (top of stack first) → multi result vars → global variables/snapshot → built-in properties. The `activeThread` field on the interpreter routes scope access through the thread's local state when set by the scheduler.
+**At top level:** global variables → built-in properties.
+
+**Inside functions (plain `x`):** local scopes (top of stack first) → multi result vars → error with hint to use `::x`.
+
+**Inside functions (`::x`):** global variables/snapshot → built-in properties.
+
+The `::` prefix (`GLOBAL_PREFIX` token) bypasses local scopes and accesses globals directly. At top level, `x` and `::x` are equivalent. The `activeThread` field on the interpreter routes scope access through the thread's local state when set by the scheduler.
 
 ### Flow Control
 
@@ -143,6 +149,10 @@ Variable lookup order: local scopes (top of stack first) → multi result vars �
 ```
 // Variables
 x = 10
+
+// Global access inside functions (:: prefix)
+function readX() do return ::x end
+function setX(v) do ::x = v end
 
 // Functions
 function add(a, b) do return a + b end
