@@ -51,11 +51,16 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 # Run all tests via JUnit (integrated with build)
 ./gradlew test
 
+# Run a single test by name (parameterized test filter)
+./gradlew test --tests "com.propertee.tests.ScriptTest.testScript[09_functions]"
+
 # Run all tests via shell script (compares JAR output against .expected files)
 ./test_all.sh
 ```
 
 There are 41 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`.
+
+**Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
 **Sample scripts:** `sample/01_hello.pt` through `sample/16_comments.pt` cover all language features.
 
@@ -94,24 +99,28 @@ interface Stepper {
 - `StepResult.command(cmd)` = scheduler command (SLEEP, SPAWN_THREADS)
 - `StepResult.done(value)` = stepper completed with result
 
+### Package Structure
+
+| Package | Role |
+|---|---|
+| `com.propertee.cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
+| `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1540 lines), built-in functions, scope management, function definitions |
+| `com.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
+| `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
+| `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
+| `com.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `grammar/ProperTee.g4`) |
+
 ### Key Files
 
 | File | Role |
 |---|---|
-| `ProperTee.g4` | ANTLR4 grammar — defines all syntax |
-| `ProperTeeInterpreter.java` | Main visitor (~1500 lines). All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper, ParallelStepper) |
-| `BuiltinFunctions.java` | 23 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, etc.). `registerExternal()` for I/O functions with result pattern |
-| `Result.java` | Helper for external function result objects: `Result.ok(value)`, `Result.error(msg)` |
+| `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule) |
+| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper, ParallelStepper). `eval()` for expressions, `createStepper()` for statements |
+| `BuiltinFunctions.java` | 23 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, etc.). `registerExternal()` for I/O functions with result pattern. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning, monitor ticking |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships |
-| `ThreadState.java` | Enum: READY, RUNNING, SLEEPING, WAITING, COMPLETED, ERROR |
-| `Stepper.java` | Core interface |
-| `StepResult.java` | Step result types: BOUNDARY, COMMAND, DONE |
-| `SchedulerCommand.java` | Commands from interpreter to scheduler: SLEEP, SPAWN_THREADS |
 | `TypeChecker.java` | Runtime type checks, number formatting, value formatting |
 | `ScopeStack.java` | Scope chain with UNDEFINED sentinel |
-| `Main.java` | CLI entry point with arg parsing |
-| `Repl.java` | Interactive REPL with multi-line block detection |
 
 ### Thread Purity Model
 
@@ -193,12 +202,14 @@ end
 ## Conventions
 
 - **No null** — the language has no null keyword. Functions without `return` or with bare `return` produce `{}` (empty object). Missing function arguments default to `{}`.
-- Java 7 target compatibility (no lambdas, no streams, no Java 8 APIs — anonymous inner classes throughout). Build currently set to `-source 1.8 -target 1.8` for JDK 9+ compatibility; switch to `VERSION_1_7` when building with JDK 8.
+- **Java 7 target compatibility** — no lambdas, no streams, no Java 8 APIs. Use anonymous inner classes throughout. Build currently set to `-source 1.8 -target 1.8` for JDK 9+ compatibility; switch to `VERSION_1_7` when building with JDK 8.
+- **Collections** — use `LinkedHashMap<String, Object>` for objects (preserves insertion order), `ArrayList<Object>` for lists. The `Object` type represents all values at runtime.
 - `SLEEP()` returns a `SchedulerCommand` — the stepper yields it to the scheduler
 - 1-based indexing for array access (`.1` is the first element)
 - Strict type checking: no coercion, `and`/`or` require booleans, arithmetic requires numbers
 - Numbers: `Integer` for whole numbers, `Double` for decimals. Format helper strips `.0`
 - Division always produces `Double`
+- Semicolons are optional statement separators (treated as whitespace by the lexer)
 
 ## Dependencies
 
