@@ -80,7 +80,10 @@ public class Repl {
                 Stepper mainStepper = visitor.createRootStepper(tree);
 
                 try {
-                    scheduler.run(mainStepper);
+                    Object result = scheduler.run(mainStepper);
+                    if (result != null) {
+                        System.out.println("=> " + TypeChecker.formatValue(result));
+                    }
                 } catch (Exception e) {
                     System.err.println("Runtime error: " + e.getMessage());
                 }

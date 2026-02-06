@@ -307,6 +307,8 @@ public class Scheduler {
                 if (thread.id == 0) {
                     throw (error instanceof RuntimeException) ? (RuntimeException) error : new RuntimeException(error);
                 }
+                // Print child thread errors to stderr
+                visitor.stderr.print(new Object[]{"[THREAD ERROR] " + error.getMessage()});
             }
         }
 
