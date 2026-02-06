@@ -35,9 +35,8 @@ public class TypeChecker {
     }
 
     public static boolean isTruthy(Object value) {
-        if (value == null) return false;
         if (value instanceof Boolean) return (Boolean) value;
-        return true;
+        return false;
     }
 
     public static double toDouble(Object value) {

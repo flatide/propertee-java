@@ -30,10 +30,10 @@ There is **no null**. The empty object `{}` serves as the "no value" sentinel th
 
 Used in `if` conditions and `loop` conditions:
 
-- **Falsy:** `false` only
-- **Truthy:** everything else — including `0`, `""`, `[]`, `{}`
+- **Truthy:** `true` only
+- **Falsy:** everything else — including `false`, `0`, `""`, `[]`, `{}`
 
-Note: `{}` (empty object) is truthy.
+Note: Conditions must use explicit boolean comparisons (e.g., `if x == true then` or `if x != false then`).
 
 ## Variables
 
