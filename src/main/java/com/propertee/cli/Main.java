@@ -169,10 +169,7 @@ public class Main {
             Stepper mainStepper = visitor.createRootStepper(tree);
 
             try {
-                Object result = scheduler.run(mainStepper);
-                if (result != null) {
-                    System.out.println("Result: " + TypeChecker.formatValue(result));
-                }
+                scheduler.run(mainStepper);
             } catch (Exception e) {
                 System.err.println("Runtime error: " + e.getMessage());
                 System.exit(1);
