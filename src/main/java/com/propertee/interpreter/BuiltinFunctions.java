@@ -296,6 +296,20 @@ public class BuiltinFunctions {
                 return ((String) args.get(0)).trim();
             }
         });
+
+        functions.put("HAS_KEY", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                Object obj = args.get(0);
+                Object key = args.get(1);
+                if (!(obj instanceof Map))
+                    throw new ProperTeeError("Runtime Error: HAS_KEY() first argument must be an object");
+                if (!(key instanceof String))
+                    throw new ProperTeeError("Runtime Error: HAS_KEY() second argument must be a string");
+                return ((Map<String, Object>) obj).containsKey((String) key);
+            }
+        });
     }
 
     public boolean has(String name) {

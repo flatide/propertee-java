@@ -61,7 +61,8 @@ public class ScriptTest {
             "42_global_prefix", "43_global_prefix_error",
             "44_global_prefix_thread", "45_global_prefix_thread_error",
             "46_thread_error_result",
-            "47_spawn_outside_multi"
+            "47_spawn_outside_multi",
+            "48_has_key"
         };
 
         for (String name : testNames) {
