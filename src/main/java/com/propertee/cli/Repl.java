@@ -99,7 +99,7 @@ public class Repl {
         String[] tokens = line.trim().split("\\s+");
         int delta = 0;
         for (String tok : tokens) {
-            if ("do".equals(tok) || "if".equals(tok) || "multi".equals(tok)) delta++;
+            if ("do".equals(tok) || "if".equals(tok)) delta++;
             if ("end".equals(tok)) delta--;
         }
         return delta;

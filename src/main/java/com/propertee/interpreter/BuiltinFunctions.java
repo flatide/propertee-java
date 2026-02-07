@@ -110,6 +110,7 @@ public class BuiltinFunctions {
                 Object a = args.get(0);
                 if (a instanceof List) return ((List<?>) a).size();
                 if (a instanceof String) return ((String) a).length();
+                if (a instanceof Map) return ((Map<?, ?>) a).size();
                 return 0;
             }
         });

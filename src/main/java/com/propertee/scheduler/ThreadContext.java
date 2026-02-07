@@ -43,11 +43,12 @@ public class ThreadContext {
     // Scheduler bookkeeping for MULTI
     public Map<Integer, Object> childResults = null;
     public List<Integer> childIds = null;
-    public List<String> resultVarNames = null;
+    public List<String> resultKeyNames = null;
+    public String resultCollectionVarName = null; // the [result] variable name
     public Object collectedResults = null;
 
     // Per-child tracking
-    public String resultVarName = null;
+    public String resultKeyName = null; // this child's key in the collection
     public Map<String, Object> localScope = null;
 
     public ThreadContext(int id, String name, Stepper stepper, Map<String, Object> globalSnapshot) {

@@ -15,7 +15,8 @@ public class SchedulerCommand {
     private List<ThreadSpec> specs;
     private MonitorSpec monitorSpec;
     private Map<String, Object> globalSnapshot;
-    private List<String> resultVarNames;
+    private List<String> resultKeyNames;
+    private String resultVarName; // the [result] collection variable name (null for fire-and-forget)
 
     private SchedulerCommand(CommandType type) {
         this.type = type;
@@ -28,12 +29,14 @@ public class SchedulerCommand {
     }
 
     public static SchedulerCommand spawnThreads(List<ThreadSpec> specs, MonitorSpec monitorSpec,
-                                                  Map<String, Object> globalSnapshot, List<String> resultVarNames) {
+                                                  Map<String, Object> globalSnapshot, List<String> resultKeyNames,
+                                                  String resultVarName) {
         SchedulerCommand cmd = new SchedulerCommand(CommandType.SPAWN_THREADS);
         cmd.specs = specs;
         cmd.monitorSpec = monitorSpec;
         cmd.globalSnapshot = globalSnapshot;
-        cmd.resultVarNames = resultVarNames;
+        cmd.resultKeyNames = resultKeyNames;
+        cmd.resultVarName = resultVarName;
         return cmd;
     }
 
@@ -42,7 +45,8 @@ public class SchedulerCommand {
     public List<ThreadSpec> getSpecs() { return specs; }
     public MonitorSpec getMonitorSpec() { return monitorSpec; }
     public Map<String, Object> getGlobalSnapshot() { return globalSnapshot; }
-    public List<String> getResultVarNames() { return resultVarNames; }
+    public List<String> getResultKeyNames() { return resultKeyNames; }
+    public String getResultVarName() { return resultVarName; }
 
     public static class ThreadSpec {
         private final String name;

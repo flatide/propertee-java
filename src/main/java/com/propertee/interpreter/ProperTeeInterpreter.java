@@ -46,14 +46,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public static class SpawnSpec {
         public final String funcName;
         public final List<Object> args;
-        public final String resultVarName; // null for fire-and-forget
+        public final String resultKey; // null for fire-and-forget (key in collection)
         public final org.antlr.v4.runtime.ParserRuleContext ctx;
 
-        public SpawnSpec(String funcName, List<Object> args, String resultVarName,
+        public SpawnSpec(String funcName, List<Object> args, String resultKey,
                          org.antlr.v4.runtime.ParserRuleContext ctx) {
             this.funcName = funcName;
             this.args = args;
-            this.resultVarName = resultVarName;
+            this.resultKey = resultKey;
             this.ctx = ctx;
         }
     }
@@ -154,25 +154,32 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     /**
      * Process collected results from SPAWN_THREADS command (sent back by scheduler).
-     * Assigns thread results to the appropriate variables.
+     * Builds a result collection map and assigns it to the result variable.
      */
     @SuppressWarnings("unchecked")
     private static void processSpawnResults(ProperTeeInterpreter interp, Object sendValue) {
         if (sendValue == null) return;
-        List<Map<String, Object>> collectedResults = (List<Map<String, Object>>) sendValue;
+        Map<String, Object> payload = (Map<String, Object>) sendValue;
+        String resultVarName = (String) payload.get("resultVarName");
+        List<Map<String, Object>> results = (List<Map<String, Object>>) payload.get("results");
+
+        if (resultVarName == null) return; // fire-and-forget
+
+        Map<String, Object> collection = new LinkedHashMap<String, Object>();
+        int pos = 1;
+        for (Map<String, Object> entry : results) {
+            String keyName = (String) entry.get("keyName");
+            String key = keyName != null ? keyName : String.valueOf(pos);
+            collection.put(key, entry.get("result"));
+            pos++;
+        }
+
         ScopeStack ss = interp.getScopeStack();
         Map<String, Object> vars = interp.getVariables();
-
-        for (Map<String, Object> entry : collectedResults) {
-            String varName = (String) entry.get("varName");
-            if (varName != null) {
-                Object finalValue = entry.get("result"); // Already {ok, value} Result from Scheduler
-                if (!ss.isEmpty()) {
-                    ss.set(varName, finalValue);
-                } else {
-                    vars.put(varName, finalValue);
-                }
-            }
+        if (!ss.isEmpty()) {
+            ss.set(resultVarName, collection);
+        } else {
+            vars.put(resultVarName, collection);
         }
     }
 
@@ -497,63 +504,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             interp.getScopeStack().pop();
             result = val;
             done = true;
-            return StepResult.done(result);
-        }
-
-        @Override
-        public boolean isDone() { return done; }
-        @Override
-        public Object getResult() { return result; }
-        @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
-    }
-
-    /** Parallel stepper: for MULTI blocks, yields SPAWN_THREADS command then waits for results */
-    public static class ParallelStepper implements Stepper {
-        private final ProperTeeInterpreter interp;
-        private final SchedulerCommand command;
-        private boolean done = false;
-        private boolean commandSent = false;
-        private Object result = null;
-        private Object sendValue = null;
-
-        public ParallelStepper(ProperTeeInterpreter interp, SchedulerCommand command) {
-            this.interp = interp;
-            this.command = command;
-        }
-
-        @Override
-        public StepResult step() {
-            if (done) return StepResult.done(result);
-
-            if (!commandSent) {
-                commandSent = true;
-                return StepResult.command(command);
-            }
-
-            // After resume with sendValue (collected results from scheduler)
-            if (sendValue != null) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> collectedResults = (List<Map<String, Object>>) sendValue;
-                ScopeStack ss = interp.getScopeStack();
-                Map<String, Object> vars = interp.getVariables();
-
-                for (Map<String, Object> entry : collectedResults) {
-                    String varName = (String) entry.get("varName");
-                    if (varName != null) {
-                        Object finalValue = entry.get("result"); // Already {ok, value} Result from Scheduler
-                        if (!ss.isEmpty()) {
-                            ss.set(varName, finalValue);
-                        } else {
-                            vars.put(varName, finalValue);
-                        }
-                    }
-                }
-                sendValue = null;
-            }
-
-            done = true;
-            result = null;
             return StepResult.done(result);
         }
 
@@ -1115,6 +1065,19 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Object getProperty(Object target, Object key, org.antlr.v4.runtime.ParserRuleContext ctx) {
         if (target instanceof Map) {
             Map<String, Object> map = (Map<String, Object>) target;
+            // Positional access: .INTEGER on maps (0-based index from visitArrayAccess)
+            if (key instanceof Number) {
+                int idx = ((Number) key).intValue();
+                if (idx < 0 || idx >= map.size()) {
+                    if (ctx != null) throw createError("Map positional index out of bounds: " + (idx + 1), ctx);
+                    throw new ProperTeeError("Runtime Error: Map positional index out of bounds: " + (idx + 1));
+                }
+                int i = 0;
+                for (Object val : map.values()) {
+                    if (i == idx) return val;
+                    i++;
+                }
+            }
             String strKey = String.valueOf(key);
             if (!map.containsKey(strKey)) {
                 if (ctx != null) throw createError("Property '" + key + "' does not exist", ctx);
@@ -1394,7 +1357,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
         ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
         String funcName = funcCallCtx.funcName.getText();
-        String varName = ctx.ID().getText();
+        String keyName = ctx.ID().getText();
+
+        // Duplicate key check
+        for (SpawnSpec existing : collectedSpawns) {
+            if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
+                throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
+            }
+        }
 
         // Evaluate arguments now (during setup phase)
         List<Object> args = new ArrayList<Object>();
@@ -1404,7 +1374,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
         }
 
-        collectedSpawns.add(new SpawnSpec(funcName, args, varName, funcCallCtx));
+        collectedSpawns.add(new SpawnSpec(funcName, args, keyName, funcCallCtx));
         return null;
     }
 
@@ -1435,6 +1405,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Object visitParallelStmt(ProperTeeParser.ParallelStmtContext ctx) {
         Map<String, Object> vars = getVariables();
 
+        // Extract result variable name from [resultVar] syntax (nullable)
+        String resultVarName = ctx.resultVar != null ? ctx.resultVar.getText() : null;
+
         // Snapshot globals for threads
         Map<String, Object> globalSnapshot = new LinkedHashMap<String, Object>(vars);
 
@@ -1448,19 +1421,27 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             inMultiSetup = false;
         }
 
-        // If no spawns were collected, just return (setup-only multi block)
+        // If no spawns were collected, assign empty map if result var specified
         if (collectedSpawns.isEmpty()) {
             collectedSpawns = null;
+            if (resultVarName != null) {
+                ScopeStack ss = getScopeStack();
+                if (!ss.isEmpty()) {
+                    ss.set(resultVarName, new LinkedHashMap<String, Object>());
+                } else {
+                    vars.put(resultVarName, new LinkedHashMap<String, Object>());
+                }
+            }
             return null;
         }
 
         // Build thread specs from collected spawns
-        List<String> resultVarNames = new ArrayList<String>();
+        List<String> resultKeyNames = new ArrayList<String>();
         List<SchedulerCommand.ThreadSpec> specs = new ArrayList<SchedulerCommand.ThreadSpec>();
 
         for (int i = 0; i < collectedSpawns.size(); i++) {
             SpawnSpec spawn = collectedSpawns.get(i);
-            resultVarNames.add(spawn.resultVarName);
+            resultKeyNames.add(spawn.resultKey);
 
             if (userDefinedFunctions.containsKey(spawn.funcName)) {
                 FunctionDef funcDef = userDefinedFunctions.get(spawn.funcName);
@@ -1502,7 +1483,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
 
         // Return the SPAWN_THREADS command (the scheduler will handle this)
-        return SchedulerCommand.spawnThreads(specs, monitorSpec, globalSnapshot, resultVarNames);
+        return SchedulerCommand.spawnThreads(specs, monitorSpec, globalSnapshot, resultKeyNames, resultVarName);
     }
 
     // --- LValue visitors (for property access in expressions) ---

@@ -62,7 +62,13 @@ public class ScriptTest {
             "44_global_prefix_thread", "45_global_prefix_thread_error",
             "46_thread_error_result",
             "47_spawn_outside_multi",
-            "48_has_key"
+            "48_has_key",
+            "49_multi_result_collection",
+            "50_multi_dynamic_spawn",
+            "51_multi_auto_keys",
+            "52_multi_duplicate_key_error",
+            "53_len_on_maps",
+            "54_map_positional_access"
         };
 
         for (String name : testNames) {

@@ -113,7 +113,7 @@ public class Scheduler {
 
     private void handleSpawnThreads(ThreadContext parentThread, SchedulerCommand command) {
         List<SchedulerCommand.ThreadSpec> specs = command.getSpecs();
-        List<String> resultVarNames = command.getResultVarNames();
+        List<String> resultKeyNames = command.getResultKeyNames();
         Map<String, Object> globalSnapshot = command.getGlobalSnapshot();
         List<Integer> childIds = new ArrayList<Integer>();
 
@@ -126,7 +126,7 @@ public class Scheduler {
             );
             childThread.parentId = parentThread.id;
             childThread.inThreadContext = true;
-            childThread.resultVarName = resultVarNames.get(i);
+            childThread.resultKeyName = resultKeyNames.get(i);
             childThread.localScope = spec.getLocalScope();
             childIds.add(childThread.id);
         }
@@ -146,7 +146,8 @@ public class Scheduler {
         parentThread.markWaiting(childIds);
         parentThread.childResults = new LinkedHashMap<Integer, Object>();
         parentThread.childIds = childIds;
-        parentThread.resultVarNames = resultVarNames;
+        parentThread.resultKeyNames = resultKeyNames;
+        parentThread.resultCollectionVarName = command.getResultVarName();
     }
 
     private void notifyChildCompleted(ThreadContext childThread) {
@@ -166,16 +167,19 @@ public class Scheduler {
 
         boolean allDone = parent.childCompleted(childThread.id);
         if (allDone) {
-            // Collect results in order
+            // Build payload with collection semantics
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("resultVarName", parent.resultCollectionVarName);
+
             List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
             for (int cid : parent.childIds) {
                 Map<String, Object> entry = new LinkedHashMap<String, Object>();
                 entry.put("result", parent.childResults.get(cid));
                 ThreadContext ct = threads.get(cid);
-                entry.put("varName", ct != null ? ct.resultVarName : null);
-                entry.put("localScope", ct != null ? ct.localScope : null);
+                entry.put("keyName", ct != null ? ct.resultKeyName : null);
                 results.add(entry);
             }
+            payload.put("results", results);
 
             // Run final monitor tick
             runFinalMonitor(childThread.parentId);
@@ -189,7 +193,7 @@ public class Scheduler {
             }
 
             // Send collected results back to parent stepper
-            parent.collectedResults = results;
+            parent.collectedResults = payload;
         }
     }
 
