@@ -58,7 +58,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-There are 53 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects. Test 47 (`spawn_outside_multi`) verifies `thread` outside multi block is a runtime error. Test 48 (`has_key`) verifies `HAS_KEY()` built-in function. Tests 49-54 cover multi result collection, dynamic spawn, auto keys, duplicate key error, LEN on maps, and map positional access.
+There are 55 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects. Test 47 (`spawn_outside_multi`) verifies `thread` outside multi block is a runtime error. Test 48 (`has_key`) verifies `HAS_KEY()` built-in function. Tests 49-54 cover multi result collection, dynamic spawn, auto keys, duplicate key error, LEN on maps, and map positional access. Test 55 (`thread_status_field`) verifies the `status` field on thread results. Test 56 (`monitor_reads_result`) verifies that monitor clauses can read thread result status during execution.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -129,7 +129,7 @@ Functions spawned inside multi blocks are pure with respect to global state:
 - **Cannot write** globals — `::x = value` is a runtime error (enforced via `inThreadContext` flag set by Scheduler)
 - **Can call** any function (user-defined or built-in)
 - **Can create** and modify local variables freely (plain `x` without `::`)
-- **Return results** via `thread func() -> key` syntax as Result objects: `{ok: true, value: <result>}` on success, `{ok: false, value: "<error>"}` on error. All results collected into the `resultVar` map after all threads complete
+- **Return results** via `thread func() -> key` syntax as Result objects: `{status: "done", ok: true, value: <result>}` on success, `{status: "error", ok: false, value: "<error>"}` on error. Results are pre-built with `{status: "running", ok: false, value: {}}` at spawn time and updated in-place as threads complete. The monitor clause can read `resultVar.key.status` during execution. The collection is assigned to `resultVar` after all threads finish.
 - No locks, no shared mutable state
 
 ### Scope Resolution
@@ -221,9 +221,10 @@ else
 end
 ```
 
-- `Result.ok(value)` → `{ok: true, value: ...}`
-- `Result.error(message)` → `{ok: false, value: "..."}`
-- `registerExternal()` wraps the function in try-catch — thrown exceptions automatically become `{ok: false, value: "error message"}`
+- `Result.running()` → `{status: "running", ok: false, value: {}}`
+- `Result.ok(value)` → `{status: "done", ok: true, value: ...}`
+- `Result.error(message)` → `{status: "error", ok: false, value: "..."}`
+- `registerExternal()` wraps the function in try-catch — thrown exceptions automatically become `{status: "error", ok: false, value: "error message"}`
 - Core builtins (PRINT, SUM, LEN, etc.) return values directly and are not wrapped
 
 ## Conventions

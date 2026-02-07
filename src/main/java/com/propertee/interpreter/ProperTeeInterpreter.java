@@ -161,18 +161,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         if (sendValue == null) return;
         Map<String, Object> payload = (Map<String, Object>) sendValue;
         String resultVarName = (String) payload.get("resultVarName");
-        List<Map<String, Object>> results = (List<Map<String, Object>>) payload.get("results");
+        Map<String, Object> collection = (Map<String, Object>) payload.get("collection");
 
         if (resultVarName == null) return; // fire-and-forget
-
-        Map<String, Object> collection = new LinkedHashMap<String, Object>();
-        int pos = 1;
-        for (Map<String, Object> entry : results) {
-            String keyName = (String) entry.get("keyName");
-            String key = keyName != null ? keyName : String.valueOf(pos);
-            collection.put(key, entry.get("result"));
-            pos++;
-        }
 
         ScopeStack ss = interp.getScopeStack();
         Map<String, Object> vars = interp.getVariables();

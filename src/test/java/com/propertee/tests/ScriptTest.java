@@ -68,7 +68,9 @@ public class ScriptTest {
             "51_multi_auto_keys",
             "52_multi_duplicate_key_error",
             "53_len_on_maps",
-            "54_map_positional_access"
+            "54_map_positional_access",
+            "55_thread_status_field",
+            "56_monitor_reads_result"
         };
 
         for (String name : testNames) {

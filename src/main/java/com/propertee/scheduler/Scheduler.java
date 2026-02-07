@@ -144,10 +144,22 @@ public class Scheduler {
         }
 
         parentThread.markWaiting(childIds);
-        parentThread.childResults = new LinkedHashMap<Integer, Object>();
         parentThread.childIds = childIds;
         parentThread.resultKeyNames = resultKeyNames;
         parentThread.resultCollectionVarName = command.getResultVarName();
+
+        // Pre-build the live result collection with Result.running() entries
+        if (command.getResultVarName() != null) {
+            Map<String, Object> collection = new LinkedHashMap<String, Object>();
+            int pos = 1;
+            for (int i = 0; i < childIds.size(); i++) {
+                String keyName = resultKeyNames.get(i);
+                String key = keyName != null ? keyName : String.valueOf(pos);
+                collection.put(key, Result.running());
+                pos++;
+            }
+            parentThread.resultCollection = collection;
+        }
     }
 
     private void notifyChildCompleted(ThreadContext childThread) {
@@ -156,30 +168,32 @@ public class Scheduler {
         ThreadContext parent = threads.get(childThread.parentId);
         if (parent == null) return;
 
-        if (parent.childResults != null) {
-            if (childThread.state == ThreadState.ERROR) {
-                parent.childResults.put(childThread.id, Result.error(
-                    childThread.error != null ? childThread.error.getMessage() : "Unknown thread error"));
-            } else {
-                parent.childResults.put(childThread.id, Result.ok(childThread.result));
+        // Update the live result collection in-place
+        if (parent.resultCollection != null) {
+            int idx = parent.childIds.indexOf(childThread.id);
+            if (idx >= 0) {
+                String keyName = parent.resultKeyNames.get(idx);
+                // Compute key same way as pre-build
+                int pos = 1;
+                for (int i = 0; i < idx; i++) {
+                    pos++;
+                }
+                String key = keyName != null ? keyName : String.valueOf(pos);
+                if (childThread.state == ThreadState.ERROR) {
+                    parent.resultCollection.put(key, Result.error(
+                        childThread.error != null ? childThread.error.getMessage() : "Unknown thread error"));
+                } else {
+                    parent.resultCollection.put(key, Result.ok(childThread.result));
+                }
             }
         }
 
         boolean allDone = parent.childCompleted(childThread.id);
         if (allDone) {
-            // Build payload with collection semantics
+            // Build payload with the live collection
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("resultVarName", parent.resultCollectionVarName);
-
-            List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
-            for (int cid : parent.childIds) {
-                Map<String, Object> entry = new LinkedHashMap<String, Object>();
-                entry.put("result", parent.childResults.get(cid));
-                ThreadContext ct = threads.get(cid);
-                entry.put("keyName", ct != null ? ct.resultKeyName : null);
-                results.add(entry);
-            }
-            payload.put("results", results);
+            payload.put("collection", parent.resultCollection);
 
             // Run final monitor tick
             runFinalMonitor(childThread.parentId);
@@ -215,9 +229,15 @@ public class Scheduler {
         ThreadContext parentThread = threads.get(monitor.parentThreadId);
         if (parentThread == null) return;
 
-        // Create a temporary thread context for monitor execution
-        ThreadContext monitorThread = new ThreadContext(-1, "monitor", null,
+        // Create a monitor scope with the result collection injected
+        Map<String, Object> monitorScope = new LinkedHashMap<String, Object>(
             parentThread.globalSnapshot != null ? parentThread.globalSnapshot : visitor.variables);
+        if (parentThread.resultCollectionVarName != null && parentThread.resultCollection != null) {
+            monitorScope.put(parentThread.resultCollectionVarName, parentThread.resultCollection);
+        }
+
+        // Create a temporary thread context for monitor execution
+        ThreadContext monitorThread = new ThreadContext(-1, "monitor", null, monitorScope);
         monitorThread.inMonitorContext = true;
 
         ThreadContext prevActiveThread = visitor.activeThread;

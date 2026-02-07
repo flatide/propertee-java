@@ -41,7 +41,7 @@ public class ThreadContext {
     public Set<Integer> waitingForChildren = null;
 
     // Scheduler bookkeeping for MULTI
-    public Map<Integer, Object> childResults = null;
+    public Map<String, Object> resultCollection = null; // live collection updated in-place
     public List<Integer> childIds = null;
     public List<String> resultKeyNames = null;
     public String resultCollectionVarName = null; // the [result] variable name
