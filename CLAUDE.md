@@ -43,7 +43,7 @@ java -jar build/libs/propertee-java.jar --max-iterations 5000 script.pt    # cus
 java -jar build/libs/propertee-java.jar                                    # interactive REPL
 ```
 
-REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are auto-detected via `do`/`if`/`multi` vs `end` depth.
+REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are auto-detected via `do`/`if` vs `end` depth.
 
 ## Testing
 
@@ -117,8 +117,8 @@ interface Stepper {
 | `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. |
 | `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `thread` spawn visitors collect specs during multi setup. `eval()` for expressions, `createStepper()` for statements. Positional map access in `getProperty()`. |
 | `BuiltinFunctions.java` | 24 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for I/O functions with result pattern. `PrintFunction` interface takes `Object[]` args, not `String` |
-| `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning, monitor ticking |
-| `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships |
+| `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time, updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
+| `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships, `resultCollection` (live map updated in-place by scheduler) |
 | `TypeChecker.java` | Runtime type checks, number formatting, value formatting |
 | `ScopeStack.java` | Scope chain with UNDEFINED sentinel |
 
@@ -166,11 +166,12 @@ function worker(name) do
 end
 
 // Parallel execution — results collected into result object
+// Each entry is {status: "done"/"error"/"running", ok: true/false, value: ...}
 multi result do
     thread worker("A") -> a
     thread worker("B") -> b
 monitor 100
-    PRINT("[tick]")
+    PRINT(result.a.status)   // "running" or "done" — monitor reads live status
 end
 PRINT(result.a.value)   // named access
 PRINT(result.1.value)   // positional access
