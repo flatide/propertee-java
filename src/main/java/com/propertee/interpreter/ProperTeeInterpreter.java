@@ -365,7 +365,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     yieldBoundary = true;
                     return StepResult.BOUNDARY;
                 } else {
-                    return finish(null);
+                    return finish(new LinkedHashMap<String, Object>());
                 }
             }
 
@@ -376,9 +376,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
             if (index < statements.size()) {
                 try {
-                    result = interp.eval(statements.get(index));
-                    if (result instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) result;
+                    Object evalResult = interp.eval(statements.get(index));
+                    if (evalResult instanceof SchedulerCommand) {
+                        SchedulerCommand cmd = (SchedulerCommand) evalResult;
                         result = null;
                         index++;
                         if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
@@ -391,14 +391,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         yieldBoundary = true;
                         return StepResult.BOUNDARY;
                     } else {
-                        return finish(result);
+                        return finish(new LinkedHashMap<String, Object>());
                     }
                 } catch (ReturnException e) {
                     return finish(e.getValue());
                 }
             }
 
-            return finish(result);
+            return finish(new LinkedHashMap<String, Object>());
         }
 
         private StepResult finish(Object val) {
@@ -469,7 +469,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     yieldBoundary = true;
                     return StepResult.BOUNDARY;
                 } else {
-                    return finish(null);
+                    return finish(new LinkedHashMap<String, Object>());
                 }
             }
 
@@ -480,9 +480,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
             if (index < statements.size()) {
                 try {
-                    result = interp.eval(statements.get(index));
-                    if (result instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) result;
+                    Object evalResult = interp.eval(statements.get(index));
+                    if (evalResult instanceof SchedulerCommand) {
+                        SchedulerCommand cmd = (SchedulerCommand) evalResult;
                         result = null;
                         index++;
                         if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
@@ -495,14 +495,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         yieldBoundary = true;
                         return StepResult.BOUNDARY;
                     } else {
-                        return finish(result);
+                        return finish(new LinkedHashMap<String, Object>());
                     }
                 } catch (ReturnException e) {
                     return finish(e.getValue());
                 }
             }
 
-            return finish(result);
+            return finish(new LinkedHashMap<String, Object>());
         }
 
         private StepResult finish(Object val) {
