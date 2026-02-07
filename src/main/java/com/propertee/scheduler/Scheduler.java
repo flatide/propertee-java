@@ -160,15 +160,7 @@ public class Scheduler {
                 parent.childResults.put(childThread.id, Result.error(
                     childThread.error != null ? childThread.error.getMessage() : "Unknown thread error"));
             } else {
-                // Unwrap {result: ...} wrapper from thread-to-thread calls, then wrap as Result
-                Object rawResult = childThread.result;
-                if (rawResult instanceof Map) {
-                    Map<?, ?> m = (Map<?, ?>) rawResult;
-                    if (m.containsKey("result")) {
-                        rawResult = m.get("result");
-                    }
-                }
-                parent.childResults.put(childThread.id, Result.ok(rawResult));
+                parent.childResults.put(childThread.id, Result.ok(childThread.result));
             }
         }
 

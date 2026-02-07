@@ -53,14 +53,15 @@ public class ScriptTest {
             "20_thread_monitor", "21_thread_no_result", "22_thread_calling_thread",
             "23_error_type_mismatch", "24_error_undefined_var", "25_error_undefined_func",
             "26_error_div_zero", "27_error_null_access", "28_error_not_boolean",
-            "29_error_loop_limit", "30_thread_local_scope", "31_error_regular_in_multi",
+            "29_error_loop_limit", "30_thread_local_scope",
             "32_error_monitor_assign", "33_complex_expressions", "34_builtin_properties",
             "35_object_computed_keys", "36_function_with_loops", "37_thread_with_loops",
             "38_many_threads", "39_escape_strings", "40_multi_after_multi",
             "41_result_pattern",
             "42_global_prefix", "43_global_prefix_error",
             "44_global_prefix_thread", "45_global_prefix_thread_error",
-            "46_thread_error_result"
+            "46_thread_error_result",
+            "47_spawn_outside_multi"
         };
 
         for (String name : testNames) {

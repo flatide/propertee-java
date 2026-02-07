@@ -58,7 +58,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-There are 46 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects.
+There are 46 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects. Test 47 (`spawn_outside_multi`) verifies `thread` outside multi block is a runtime error.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -114,8 +114,8 @@ interface Stepper {
 
 | File | Role |
 |---|---|
-| `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule) |
-| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper, ParallelStepper). `eval()` for expressions, `createStepper()` for statements |
+| `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. |
+| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper, ParallelStepper). `thread` spawn visitors collect specs during multi setup. `eval()` for expressions, `createStepper()` for statements |
 | `BuiltinFunctions.java` | 23 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, etc.). `registerExternal()` for I/O functions with result pattern. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning, monitor ticking |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships |
@@ -124,11 +124,11 @@ interface Stepper {
 
 ### Thread Purity Model
 
-Thread functions are pure with respect to global state:
+Functions running inside multi blocks are pure with respect to global state:
 - **Can read** globals via a snapshot taken at MULTI block entry
-- **Cannot write** globals (enforced at runtime)
-- **Can only call** other thread functions or built-in functions
-- **Return results** via `->` syntax in MULTI blocks as Result objects: `{ok: true, value: <result>}` on success, `{ok: false, value: "<error>"}` on error. Results assigned only after ALL threads complete
+- **Cannot write** globals (enforced at runtime via `inThreadContext` flag set by Scheduler)
+- **Can call** any function (user-defined or built-in)
+- **Return results** via `thread func() -> var` syntax in MULTI blocks as Result objects: `{ok: true, value: <result>}` on success, `{ok: false, value: "<error>"}` on error. Results assigned only after ALL threads complete
 
 ### Scope Resolution
 
@@ -157,20 +157,28 @@ function setX(v) do ::x = v end
 // Functions
 function add(a, b) do return a + b end
 
-// Thread functions (callable from multi blocks)
-thread worker(name) do
+// Any function can run in multi blocks via thread keyword
+function worker(name) do
     PRINT(name + " working")
     return 42
 end
 
 // Parallel execution (results are {ok, value} objects)
 multi
-    worker("A") -> resultA
-    worker("B") -> resultB
+    thread worker("A") -> resultA
+    thread worker("B") -> resultB
 monitor 100
     PRINT("[tick]")
 end
 PRINT(resultA.value)  // access return value
+
+// Conditional spawning in multi blocks
+multi
+    if needsA == true then
+        thread workerA() -> rA
+    end
+    thread workerB() -> rB
+end
 
 // Loops
 loop condition infinite do ... end

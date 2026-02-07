@@ -38,6 +38,26 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public boolean inMonitorContext = false;
     public boolean inThreadContext = false;
 
+    // SPAWN collection (used during multi block setup)
+    public boolean inMultiSetup = false;
+    public List<SpawnSpec> collectedSpawns = null;
+
+    /** Spec for a SPAWN statement collected during multi block setup */
+    public static class SpawnSpec {
+        public final String funcName;
+        public final List<Object> args;
+        public final String resultVarName; // null for fire-and-forget
+        public final org.antlr.v4.runtime.ParserRuleContext ctx;
+
+        public SpawnSpec(String funcName, List<Object> args, String resultVarName,
+                         org.antlr.v4.runtime.ParserRuleContext ctx) {
+            this.funcName = funcName;
+            this.args = args;
+            this.resultVarName = resultVarName;
+            this.ctx = ctx;
+        }
+    }
+
     // Active thread context (set by scheduler)
     public ThreadContext activeThread = null;
 
@@ -146,14 +166,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         for (Map<String, Object> entry : collectedResults) {
             String varName = (String) entry.get("varName");
             if (varName != null) {
-                Object threadResult = entry.get("result");
-                Object finalValue = threadResult;
-                if (threadResult instanceof Map) {
-                    Map<?, ?> m = (Map<?, ?>) threadResult;
-                    if (m.containsKey("result")) {
-                        finalValue = m.get("result");
-                    }
-                }
+                Object finalValue = entry.get("result"); // Already {ok, value} Result from Scheduler
                 if (!ss.isEmpty()) {
                     ss.set(varName, finalValue);
                 } else {
@@ -321,8 +334,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         private final FunctionDef funcDef;
         private final Map<String, Object> localScope;
         private final List<ProperTeeParser.StatementContext> statements;
-        private final boolean isThread;
-        private final boolean previousThreadContext;
         private int index = 0;
         private Object result = null;
         private boolean done = false;
@@ -337,8 +348,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             this.funcDef = funcDef;
             this.localScope = localScope;
             this.statements = funcDef.getBody().statement();
-            this.isThread = funcDef.isThread();
-            this.previousThreadContext = interp.isInThreadContext();
         }
 
         @Override
@@ -347,13 +356,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
             if (!scopePushed) {
                 interp.getScopeStack().push(localScope);
-                if (isThread) {
-                    if (interp.activeThread != null) {
-                        interp.activeThread.inThreadContext = true;
-                    } else {
-                        interp.inThreadContext = true;
-                    }
-                }
                 scopePushed = true;
             }
 
@@ -403,21 +405,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         private StepResult finish(Object val) {
             interp.getScopeStack().pop();
-            if (interp.activeThread != null) {
-                interp.activeThread.inThreadContext = previousThreadContext;
-            } else {
-                interp.inThreadContext = previousThreadContext;
-            }
-
-            if (isThread) {
-                Map<String, Object> localCopy = new LinkedHashMap<String, Object>(localScope);
-                Map<String, Object> wrapped = new LinkedHashMap<String, Object>();
-                wrapped.put("local", localCopy);
-                wrapped.put("result", val);
-                result = wrapped;
-            } else {
-                result = val;
-            }
+            result = val;
             done = true;
             return StepResult.done(result);
         }
@@ -507,11 +495,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         private StepResult finish(Object val) {
             interp.getScopeStack().pop();
-            Map<String, Object> localCopy = new LinkedHashMap<String, Object>(localScope);
-            Map<String, Object> wrapped = new LinkedHashMap<String, Object>();
-            wrapped.put("local", localCopy);
-            wrapped.put("result", val);
-            result = wrapped;
+            result = val;
             done = true;
             return StepResult.done(result);
         }
@@ -609,8 +593,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitThreadDefStmt(ProperTeeParser.ThreadDefStmtContext ctx) {
-        return eval(ctx.threadDef());
+    public Object visitSpawnExecStmt(ProperTeeParser.SpawnExecStmtContext ctx) {
+        return eval(ctx.spawnStmt());
     }
 
     @Override
@@ -646,8 +630,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
             if (isInThreadContext()) {
                 throw createError(
-                    "Cannot assign to global variable '::" + varName + "' inside thread function. " +
-                    "Thread functions can only read global variables (via ::) and write to thread-local variables.",
+                    "Cannot assign to global variable '::" + varName + "' inside multi block. " +
+                    "Functions in multi blocks can only read global variables (via ::) and write to local variables.",
                     ctx);
             }
 
@@ -661,8 +645,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
             if (isInThreadContext() && ss.isEmpty()) {
                 throw createError(
-                    "Cannot assign to global variable '" + varName + "' inside thread function. " +
-                    "Thread functions can only read global variables (via ::) and write to thread-local variables.",
+                    "Cannot assign to global variable '" + varName + "' inside multi block. " +
+                    "Functions in multi blocks can only read global variables (via ::) and write to local variables.",
                     ctx);
             }
 
@@ -970,7 +954,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         throw new ReturnException(value);
     }
 
-    // --- Function/Thread definition ---
+    // --- Function definition ---
 
     @Override
     public Object visitFunctionDef(ProperTeeParser.FunctionDefContext ctx) {
@@ -981,20 +965,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 params.add(id.getText());
             }
         }
-        userDefinedFunctions.put(funcName, new FunctionDef(funcName, params, ctx.block(), false));
-        return null;
-    }
-
-    @Override
-    public Object visitThreadDef(ProperTeeParser.ThreadDefContext ctx) {
-        String funcName = ctx.funcName.getText();
-        List<String> params = new ArrayList<String>();
-        if (ctx.parameterList() != null) {
-            for (org.antlr.v4.runtime.tree.TerminalNode id : ctx.parameterList().ID()) {
-                params.add(id.getText());
-            }
-        }
-        userDefinedFunctions.put(funcName, new FunctionDef(funcName, params, ctx.block(), true));
+        userDefinedFunctions.put(funcName, new FunctionDef(funcName, params, ctx.block()));
         return null;
     }
 
@@ -1135,15 +1106,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         if (targetObj == null) {
             throw createError("Cannot access property '" + key + "' of null", ctx);
-        }
-
-        // Thread result {local, result} access
-        if (targetObj instanceof Map) {
-            Map<String, Object> map = (Map<String, Object>) targetObj;
-            if (map.containsKey("local") && map.containsKey("result") &&
-                ("local".equals(key) || "result".equals(key))) {
-                return map.get(String.valueOf(key));
-            }
         }
 
         return getProperty(targetObj, key, ctx);
@@ -1391,15 +1353,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     private Object callUserFunction(String funcName, List<Object> args, ProperTeeParser.FunctionCallContext callCtx) {
         FunctionDef funcDef = userDefinedFunctions.get(funcName);
         List<String> params = funcDef.getParams();
-        boolean isThread = funcDef.isThread();
         ScopeStack ss = getScopeStack();
-
-        // Thread purity check
-        if (isInThreadContext() && !isThread && !builtins.has(funcName)) {
-            throw createError(
-                "Thread functions can only call other thread functions or built-in functions. Cannot call regular function '" + funcName + "'.",
-                callCtx);
-        }
 
         // Argument count validation
         if (args.size() > params.size()) {
@@ -1417,133 +1371,127 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         // Push scope
         ss.push(localScope);
 
-        // Save and set thread context
-        boolean previousThreadContext = isInThreadContext();
-        if (activeThread != null) {
-            if (isThread) activeThread.inThreadContext = true;
-        } else {
-            if (isThread) inThreadContext = true;
-        }
-
         try {
             for (ProperTeeParser.StatementContext stmt : funcDef.getBody().statement()) {
                 eval(stmt);
             }
 
             // No explicit return: result is empty object
-            Object result = new LinkedHashMap<String, Object>();
-            if (isThread) {
-                Map<String, Object> localCopy = new LinkedHashMap<String, Object>(localScope);
-                Map<String, Object> wrapped = new LinkedHashMap<String, Object>();
-                wrapped.put("local", localCopy);
-                wrapped.put("result", result);
-                return wrapped;
-            }
-            return result;
+            return new LinkedHashMap<String, Object>();
         } catch (ReturnException e) {
-            Object val = e.getValue();
-            if (isThread) {
-                Map<String, Object> localCopy = new LinkedHashMap<String, Object>(localScope);
-                Map<String, Object> wrapped = new LinkedHashMap<String, Object>();
-                wrapped.put("local", localCopy);
-                wrapped.put("result", val);
-                return wrapped;
-            }
-            return val;
+            return e.getValue();
         } finally {
             ss.pop();
-            if (activeThread != null) {
-                activeThread.inThreadContext = previousThreadContext;
-            } else {
-                inThreadContext = previousThreadContext;
-            }
         }
     }
 
-    // --- Parallel / MULTI ---
+    // --- SPAWN statements ---
 
-    private ProperTeeParser.FunctionCallContext getTaskFunctionCall(ProperTeeParser.ParallelTaskContext taskCtx) {
-        if (taskCtx instanceof ProperTeeParser.ParallelAssignTaskContext) {
-            return ((ProperTeeParser.ParallelAssignTaskContext) taskCtx).functionCall();
+    @Override
+    public Object visitSpawnAssignStmt(ProperTeeParser.SpawnAssignStmtContext ctx) {
+        if (!inMultiSetup) {
+            throw createError("thread can only be used inside multi blocks", ctx);
         }
-        if (taskCtx instanceof ProperTeeParser.ParallelCallTaskContext) {
-            return ((ProperTeeParser.ParallelCallTaskContext) taskCtx).functionCall();
+        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
+        String funcName = funcCallCtx.funcName.getText();
+        String varName = ctx.ID().getText();
+
+        // Evaluate arguments now (during setup phase)
+        List<Object> args = new ArrayList<Object>();
+        if (funcCallCtx.expression() != null) {
+            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
+                args.add(eval(exprCtx));
+            }
         }
+
+        collectedSpawns.add(new SpawnSpec(funcName, args, varName, funcCallCtx));
         return null;
     }
 
     @Override
+    public Object visitSpawnCallStmt(ProperTeeParser.SpawnCallStmtContext ctx) {
+        if (!inMultiSetup) {
+            throw createError("thread can only be used inside multi blocks", ctx);
+        }
+        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
+        String funcName = funcCallCtx.funcName.getText();
+
+        // Evaluate arguments now (during setup phase)
+        List<Object> args = new ArrayList<Object>();
+        if (funcCallCtx.expression() != null) {
+            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
+                args.add(eval(exprCtx));
+            }
+        }
+
+        collectedSpawns.add(new SpawnSpec(funcName, args, null, funcCallCtx));
+        return null;
+    }
+
+    // --- Parallel / MULTI ---
+
+    @Override
     @SuppressWarnings("unchecked")
     public Object visitParallelStmt(ProperTeeParser.ParallelStmtContext ctx) {
-        List<ProperTeeParser.ParallelTaskContext> tasks = ctx.parallelTask();
-        List<String> resultVarNames = new ArrayList<String>();
         Map<String, Object> vars = getVariables();
 
         // Snapshot globals for threads
         Map<String, Object> globalSnapshot = new LinkedHashMap<String, Object>(vars);
 
-        // Validate tasks and collect result var names
-        for (ProperTeeParser.ParallelTaskContext taskCtx : tasks) {
-            boolean isAssign = taskCtx instanceof ProperTeeParser.ParallelAssignTaskContext;
-            ProperTeeParser.FunctionCallContext funcCallCtx = getTaskFunctionCall(taskCtx);
-            String funcName = funcCallCtx.funcName.getText();
+        // Setup phase: execute the block body, collecting SPAWN specs
+        inMultiSetup = true;
+        collectedSpawns = new ArrayList<SpawnSpec>();
 
-            if (userDefinedFunctions.containsKey(funcName)) {
-                FunctionDef funcDef = userDefinedFunctions.get(funcName);
-                if (!funcDef.isThread()) {
-                    throw createError(
-                        "Function '" + funcName + "' is not a thread function. Only thread functions can be used in MULTI blocks.",
-                        funcCallCtx);
-                }
-            }
-
-            if (isAssign) {
-                String varName = ((ProperTeeParser.ParallelAssignTaskContext) taskCtx).ID().getText();
-                resultVarNames.add(varName);
-            } else {
-                resultVarNames.add(null);
-            }
+        try {
+            evalBlock(ctx.block());
+        } finally {
+            inMultiSetup = false;
         }
 
-        // Build thread specs
+        // If no spawns were collected, just return (setup-only multi block)
+        if (collectedSpawns.isEmpty()) {
+            collectedSpawns = null;
+            return null;
+        }
+
+        // Build thread specs from collected spawns
+        List<String> resultVarNames = new ArrayList<String>();
         List<SchedulerCommand.ThreadSpec> specs = new ArrayList<SchedulerCommand.ThreadSpec>();
-        for (int i = 0; i < tasks.size(); i++) {
-            ProperTeeParser.ParallelTaskContext taskCtx = tasks.get(i);
-            ProperTeeParser.FunctionCallContext funcCallCtx = getTaskFunctionCall(taskCtx);
-            String funcName = funcCallCtx.funcName.getText();
 
-            // Evaluate args now
-            List<Object> args = new ArrayList<Object>();
-            if (funcCallCtx.expression() != null) {
-                for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
-                    args.add(eval(exprCtx));
-                }
-            }
+        for (int i = 0; i < collectedSpawns.size(); i++) {
+            SpawnSpec spawn = collectedSpawns.get(i);
+            resultVarNames.add(spawn.resultVarName);
 
-            if (userDefinedFunctions.containsKey(funcName)) {
-                FunctionDef funcDef = userDefinedFunctions.get(funcName);
+            if (userDefinedFunctions.containsKey(spawn.funcName)) {
+                FunctionDef funcDef = userDefinedFunctions.get(spawn.funcName);
                 List<String> params = funcDef.getParams();
+
+                // Argument count validation
+                if (spawn.args.size() > params.size()) {
+                    throw createError(
+                        "Function '" + spawn.funcName + "' expects " + params.size() + " argument(s), but " + spawn.args.size() + " were provided",
+                        spawn.ctx);
+                }
 
                 Map<String, Object> localScope = new LinkedHashMap<String, Object>();
                 for (int j = 0; j < params.size(); j++) {
-                    localScope.put(params.get(j), j < args.size() ? args.get(j) : new LinkedHashMap<String, Object>());
+                    localScope.put(params.get(j), j < spawn.args.size() ? spawn.args.get(j) : new LinkedHashMap<String, Object>());
                 }
 
                 Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);
-                specs.add(new SchedulerCommand.ThreadSpec(funcName + "-" + i, threadStepper, localScope));
+                specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
 
-            } else if (builtins.has(funcName)) {
-                // Built-in function: wrap result
-                Object builtinResult = builtins.get(funcName).call(args);
-                Map<String, Object> wrapped = new LinkedHashMap<String, Object>();
-                wrapped.put("local", null);
-                wrapped.put("result", builtinResult);
-                Stepper immediateStepper = new ImmediateStepper(wrapped);
-                specs.add(new SchedulerCommand.ThreadSpec("builtin-" + funcName + "-" + i, immediateStepper, null));
+            } else if (builtins.has(spawn.funcName)) {
+                // Built-in function: execute immediately and wrap result
+                Object builtinResult = builtins.get(spawn.funcName).call(spawn.args);
+                Stepper immediateStepper = new ImmediateStepper(builtinResult);
+                specs.add(new SchedulerCommand.ThreadSpec("builtin-" + spawn.funcName + "-" + i, immediateStepper, null));
             } else {
-                throw createError("Unknown function '" + funcName + "'", funcCallCtx);
+                throw createError("Unknown function '" + spawn.funcName + "'", spawn.ctx);
             }
         }
+
+        collectedSpawns = null;
 
         // Monitor spec
         SchedulerCommand.MonitorSpec monitorSpec = null;
@@ -1554,8 +1502,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
 
         // Return the SPAWN_THREADS command (the scheduler will handle this)
-        SchedulerCommand cmd = SchedulerCommand.spawnThreads(specs, monitorSpec, globalSnapshot, resultVarNames);
-        return cmd;
+        return SchedulerCommand.spawnThreads(specs, monitorSpec, globalSnapshot, resultVarNames);
     }
 
     // --- LValue visitors (for property access in expressions) ---
