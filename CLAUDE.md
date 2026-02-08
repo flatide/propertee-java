@@ -338,7 +338,7 @@ end
 - **Java 7 target compatibility** — no lambdas, no streams, no Java 8 APIs. Use anonymous inner classes throughout. Build currently set to `-source 1.8 -target 1.8` for JDK 9+ compatibility; switch to `VERSION_1_7` when building with JDK 8.
 - **Collections** — use `LinkedHashMap<String, Object>` for objects (preserves insertion order), `ArrayList<Object>` for lists. The `Object` type represents all values at runtime.
 - `SLEEP()` returns a `SchedulerCommand` — the stepper yields it to the scheduler
-- 1-based indexing for array access (`.1` is the first element)
+- 1-based indexing for array/string/map positional access (`.1` is the first element). `visitArrayAccess` returns the 1-based integer; consumers (`getProperty`, `setProperty`) convert to 0-based for arrays, strings, and map positional access. For object key assignment (`a.1 = x`), the integer becomes the string key directly (`"1"`)
 - Strict type checking: `and`/`or` require booleans, arithmetic requires numbers. Exception: `+` with at least one string coerces the other operand via `TO_STRING()` (concatenation)
 - Numbers: `Integer` for whole numbers, `Double` for decimals. Format helper strips `.0`
 - Division always produces `Double`
