@@ -142,6 +142,95 @@ Functions spawned inside multi blocks are pure with respect to global state:
 
 The `::` prefix (`GLOBAL_PREFIX` token) bypasses local scopes and accesses globals directly. At top level, `x` and `::x` are equivalent. The `activeThread` field on the interpreter routes scope access through the thread's local state when set by the scheduler.
 
+### Scheduler (`Scheduler.java`)
+
+The scheduler drives all execution — even single-threaded scripts run through it. Key mechanics:
+
+**Main loop** (`run()`):
+1. Creates thread 0 (main) with the root stepper
+2. Loop: `wakeThreads()` → `runMonitors()` → `selectNextThread()` → `step()` → `processStepResult()`
+3. When no READY threads exist: sleep-polls if SLEEPING threads remain, busy-waits if WAITING threads remain, otherwise exits
+4. Thread 0 errors propagate as exceptions; child thread errors go to stderr as `[THREAD ERROR]`
+
+**Thread selection** (`selectNextThread()`): Round-robin by sorted thread ID, starting after `currentThreadId`. Only picks READY threads.
+
+**Step result handling** (`processStepResult()`):
+- `BOUNDARY` → mark thread READY (yield point for scheduling)
+- `COMMAND(SLEEP)` → mark thread SLEEPING with wake time
+- `COMMAND(SPAWN_THREADS)` → call `handleSpawnThreads()` (creates child threads, parent goes WAITING)
+- `DONE` → mark COMPLETED, notify parent via `notifyChildCompleted()`
+
+**Thread spawning** (`handleSpawnThreads()`):
+1. Creates child ThreadContexts from specs, each with `inThreadContext = true`
+2. Sets up monitor if present (stores interval, block ctx, child IDs)
+3. Marks parent WAITING with child ID set
+4. Pre-builds `resultCollection` on parent with `Result.running()` entries (named keys use provided name, unnamed auto-keyed by 1-based position among unnamed)
+
+**Child completion** (`notifyChildCompleted()`):
+1. Updates parent's `resultCollection` in-place — `Result.ok()` or `Result.error()`
+2. Removes child from parent's `waitingForChildren` set
+3. When all children done: runs final monitor tick, removes monitor, sends `{resultVarName, collection}` payload to parent via `collectedResults`
+4. Parent wakes to READY; scheduler sends payload via `stepper.setSendValue()`
+
+**Monitor execution** (`executeMonitorSync()`): Creates a temporary ThreadContext (id -1) with `inMonitorContext = true`. Copies global snapshot and injects the live `resultCollection` under `resultCollectionVarName`. Runs the monitor block synchronously on the visitor. Monitor errors go to stderr, not thrown.
+
+**Interpreter integration**: `visitor.activeThread` is set to the current thread before each step. The interpreter's `getScopeStack()`, `getVariables()`, `isInFunctionScope()` etc. all check `activeThread` to route scope access through the thread's local state.
+
+### ThreadContext (`ThreadContext.java`)
+
+Per-thread state container. All fields are public (scheduler accesses them directly).
+
+| Field | Type | Purpose |
+|---|---|---|
+| `id` | `int` | Unique thread ID (0 = main) |
+| `name` | `String` | Debug name (e.g. `"worker-0"`, `"main"`) |
+| `stepper` | `Stepper` | The stepper driving this thread's execution |
+| `state` | `ThreadState` | `READY → RUNNING → READY → ... → COMPLETED/ERROR` |
+| `scopeStack` | `ScopeStack` | Thread-private local variable scopes |
+| `globalSnapshot` | `Map<String, Object>` | Read-only globals for thread purity (main thread uses live `variables`) |
+| `sleepUntil` | `Long` | Absolute wake time (ms) when SLEEPING, null otherwise |
+| `inThreadContext` | `boolean` | True for child threads — blocks `::x = val` writes |
+| `inMonitorContext` | `boolean` | True for monitor execution — blocks all assignments |
+| `inMultiContext` | `boolean` | True during multi setup — blocks result var access |
+| `multiResultVars` | `Map<String, Object>` | Result variables from completed multi blocks (accessible in later code) |
+| `result` | `Object` | Final return value when COMPLETED |
+| `error` | `Throwable` | Exception when ERROR |
+| `parentId` | `Integer` | Parent thread ID (null for main) |
+| `waitingForChildren` | `Set<Integer>` | Child IDs still running (null when not WAITING) |
+| `resultCollection` | `Map<String, Object>` | Live result map updated in-place as children complete |
+| `childIds` | `List<Integer>` | Ordered child thread IDs for this multi block |
+| `resultKeyNames` | `List<String>` | Parallel list of key names (null = unnamed) |
+| `resultCollectionVarName` | `String` | The `resultVar` name from `multi resultVar do` |
+| `collectedResults` | `Object` | Payload sent to parent stepper when all children done |
+| `resultKeyName` | `String` | This child's key in parent's collection |
+| `localScope` | `Map<String, Object>` | Function parameters for spawned thread |
+
+**ThreadState transitions:**
+```
+READY → RUNNING → READY           (normal step: boundary)
+READY → RUNNING → SLEEPING        (SLEEP command)
+READY → RUNNING → WAITING         (SPAWN_THREADS command, waiting for children)
+READY → RUNNING → COMPLETED       (stepper done)
+READY → RUNNING → ERROR           (exception thrown)
+WAITING → READY                    (all children completed)
+SLEEPING → READY                   (sleep timer expired)
+```
+
+### SchedulerCommand & StepResult
+
+**StepResult** — returned by `Stepper.step()`:
+- `StepResult.BOUNDARY` — statement boundary, thread yields for round-robin
+- `StepResult.done(value)` — stepper completed with final value
+- `StepResult.command(cmd)` — scheduler command requiring action
+
+**SchedulerCommand** — two types:
+- `SchedulerCommand.sleep(durationMs)` — pause current thread
+- `SchedulerCommand.spawnThreads(specs, monitorSpec, globalSnapshot, resultKeyNames, resultVarName)` — spawn child threads for multi block
+
+**SchedulerCommand.ThreadSpec** — per-thread spawn data: `{name, stepper, localScope}`
+
+**SchedulerCommand.MonitorSpec** — monitor config: `{interval, blockCtx}`
+
 ### Flow Control
 
 `BreakException`, `ContinueException`, and `ReturnException` propagate through stepper chains. Steppers catch these where appropriate (loops catch break/continue, function call steppers catch return).
