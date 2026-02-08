@@ -70,7 +70,11 @@ public class ScriptTest {
             "53_len_on_maps",
             "54_map_positional_access",
             "55_thread_status_field",
-            "56_monitor_reads_result"
+            "56_monitor_reads_result",
+            "57_dynamic_thread_keys",
+            "58_dynamic_key_digit_error",
+            "59_dynamic_key_type_error",
+            "60_dynamic_key_duplicate"
         };
 
         for (String name : testNames) {

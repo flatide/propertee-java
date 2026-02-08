@@ -1389,6 +1389,93 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return null;
     }
 
+    private String resolveAndValidateDynamicKey(Object keyValue, org.antlr.v4.runtime.ParserRuleContext ctx) {
+        if (!(keyValue instanceof String)) {
+            throw createError("Dynamic thread key must be a string, got " + TypeChecker.typeOf(keyValue), ctx);
+        }
+        String key = (String) keyValue;
+        if (key.isEmpty()) {
+            throw createError("Dynamic thread key must not be empty", ctx);
+        }
+        if (Character.isDigit(key.charAt(0))) {
+            throw createError("Dynamic thread key must not start with a digit: '" + key + "'", ctx);
+        }
+        // Duplicate key check
+        for (SpawnSpec existing : collectedSpawns) {
+            if (existing.resultKey != null && existing.resultKey.equals(key)) {
+                throw createError("Duplicate result key '" + key + "' in multi block", ctx);
+            }
+        }
+        return key;
+    }
+
+    @Override
+    public Object visitSpawnVarKeyStmt(ProperTeeParser.SpawnVarKeyStmtContext ctx) {
+        if (!inMultiSetup) {
+            throw createError("thread can only be used inside multi blocks", ctx);
+        }
+        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
+        String funcName = funcCallCtx.funcName.getText();
+
+        // Resolve the variable for the key
+        String varName = ctx.varKey.getText();
+        ScopeStack ss = getScopeStack();
+        Map<String, Object> vars = getVariables();
+
+        Object keyValue = ss.get(varName);
+        if (keyValue == ScopeStack.UNDEFINED) {
+            if (isInFunctionScope()) {
+                throw createError(
+                    "Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.",
+                    ctx);
+            }
+            if (vars.containsKey(varName)) {
+                keyValue = vars.get(varName);
+            } else if (properties.containsKey(varName)) {
+                keyValue = properties.get(varName);
+            } else {
+                throw createError("Variable '" + varName + "' is not defined", ctx);
+            }
+        }
+
+        String keyName = resolveAndValidateDynamicKey(keyValue, ctx);
+
+        // Evaluate arguments now (during setup phase)
+        List<Object> args = new ArrayList<Object>();
+        if (funcCallCtx.expression() != null) {
+            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
+                args.add(eval(exprCtx));
+            }
+        }
+
+        collectedSpawns.add(new SpawnSpec(funcName, args, keyName, funcCallCtx));
+        return null;
+    }
+
+    @Override
+    public Object visitSpawnExprKeyStmt(ProperTeeParser.SpawnExprKeyStmtContext ctx) {
+        if (!inMultiSetup) {
+            throw createError("thread can only be used inside multi blocks", ctx);
+        }
+        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
+        String funcName = funcCallCtx.funcName.getText();
+
+        // Evaluate the expression for the key
+        Object keyValue = eval(ctx.expression());
+        String keyName = resolveAndValidateDynamicKey(keyValue, ctx);
+
+        // Evaluate arguments now (during setup phase)
+        List<Object> args = new ArrayList<Object>();
+        if (funcCallCtx.expression() != null) {
+            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
+                args.add(eval(exprCtx));
+            }
+        }
+
+        collectedSpawns.add(new SpawnSpec(funcName, args, keyName, funcCallCtx));
+        return null;
+    }
+
     // --- Parallel / MULTI ---
 
     @Override
