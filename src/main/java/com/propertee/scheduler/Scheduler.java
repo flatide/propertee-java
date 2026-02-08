@@ -157,7 +157,7 @@ public class Scheduler {
                 if (keyName != null) {
                     collection.put(keyName, Result.running());
                 } else {
-                    collection.put(String.valueOf(pos), Result.running());
+                    collection.put("#" + pos, Result.running());
                     pos++;
                 }
             }
@@ -187,7 +187,7 @@ public class Scheduler {
                             pos++;
                         }
                     }
-                    key = String.valueOf(pos);
+                    key = "#" + pos;
                 }
                 if (childThread.state == ThreadState.ERROR) {
                     parent.resultCollection.put(key, Result.error(

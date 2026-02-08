@@ -1397,9 +1397,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         if (key.isEmpty()) {
             throw createError("Dynamic thread key must not be empty", ctx);
         }
-        if (Character.isDigit(key.charAt(0))) {
-            throw createError("Dynamic thread key must not start with a digit: '" + key + "'", ctx);
-        }
         // Duplicate key check
         for (SpawnSpec existing : collectedSpawns) {
             if (existing.resultKey != null && existing.resultKey.equals(key)) {
