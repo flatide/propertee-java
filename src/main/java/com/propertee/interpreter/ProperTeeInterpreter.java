@@ -1342,10 +1342,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     // --- SPAWN statements ---
 
     private String resolveAndValidateDynamicKey(Object keyValue, org.antlr.v4.runtime.ParserRuleContext ctx) {
-        if (!(keyValue instanceof String)) {
-            throw createError("Dynamic thread key must be a string, got " + TypeChecker.typeOf(keyValue), ctx);
-        }
-        String key = (String) keyValue;
+        String key = TypeChecker.toStringValue(keyValue);
         if (key.isEmpty()) {
             throw createError("Dynamic thread key must not be empty", ctx);
         }
@@ -1403,6 +1400,22 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             } else if (keyCtx instanceof ProperTeeParser.SpawnStringKeyContext) {
                 String raw = ((ProperTeeParser.SpawnStringKeyContext) keyCtx).STRING().getText();
                 keyName = processStringEscapes(raw.substring(1, raw.length() - 1));
+                // Duplicate check for static keys
+                for (SpawnSpec existing : collectedSpawns) {
+                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
+                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
+                    }
+                }
+            } else if (keyCtx instanceof ProperTeeParser.SpawnIntKeyContext) {
+                keyName = ((ProperTeeParser.SpawnIntKeyContext) keyCtx).INTEGER().getText();
+                // Duplicate check for static keys
+                for (SpawnSpec existing : collectedSpawns) {
+                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
+                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
+                    }
+                }
+            } else if (keyCtx instanceof ProperTeeParser.SpawnBoolKeyContext) {
+                keyName = keyCtx.getText();
                 // Duplicate check for static keys
                 for (SpawnSpec existing : collectedSpawns) {
                     if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
