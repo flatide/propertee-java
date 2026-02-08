@@ -154,9 +154,12 @@ public class Scheduler {
             int pos = 1;
             for (int i = 0; i < childIds.size(); i++) {
                 String keyName = resultKeyNames.get(i);
-                String key = keyName != null ? keyName : String.valueOf(pos);
-                collection.put(key, Result.running());
-                pos++;
+                if (keyName != null) {
+                    collection.put(keyName, Result.running());
+                } else {
+                    collection.put(String.valueOf(pos), Result.running());
+                    pos++;
+                }
             }
             parentThread.resultCollection = collection;
         }
@@ -173,12 +176,19 @@ public class Scheduler {
             int idx = parent.childIds.indexOf(childThread.id);
             if (idx >= 0) {
                 String keyName = parent.resultKeyNames.get(idx);
-                // Compute key same way as pre-build
-                int pos = 1;
-                for (int i = 0; i < idx; i++) {
-                    pos++;
+                String key;
+                if (keyName != null) {
+                    key = keyName;
+                } else {
+                    // Count unnamed threads before this one to get position
+                    int pos = 1;
+                    for (int i = 0; i < idx; i++) {
+                        if (parent.resultKeyNames.get(i) == null) {
+                            pos++;
+                        }
+                    }
+                    key = String.valueOf(pos);
                 }
-                String key = keyName != null ? keyName : String.valueOf(pos);
                 if (childThread.state == ThreadState.ERROR) {
                     parent.resultCollection.put(key, Result.error(
                         childThread.error != null ? childThread.error.getMessage() : "Unknown thread error"));
