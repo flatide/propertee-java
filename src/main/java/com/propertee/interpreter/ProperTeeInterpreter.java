@@ -1456,12 +1456,15 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         Map<String, Object> globalSnapshot = new LinkedHashMap<String, Object>(vars);
 
         // Setup phase: execute the block body, collecting SPAWN specs
+        // Push a scope so setup variables don't leak (:: required for globals, like functions)
         inMultiSetup = true;
         collectedSpawns = new ArrayList<SpawnSpec>();
+        getScopeStack().push(new LinkedHashMap<String, Object>());
 
         try {
             evalBlock(ctx.block());
         } finally {
+            getScopeStack().pop();
             inMultiSetup = false;
         }
 
