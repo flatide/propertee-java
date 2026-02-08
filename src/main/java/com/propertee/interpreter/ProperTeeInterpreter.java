@@ -1385,45 +1385,19 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
         String funcName = funcCallCtx.funcName.getText();
 
-        // Resolve key
+        // Resolve key using access rule (same as property access)
         String keyName = null;
-        ProperTeeParser.SpawnKeyContext keyCtx = ctx.spawnKey();
-        if (keyCtx != null) {
-            if (keyCtx instanceof ProperTeeParser.SpawnIdKeyContext) {
-                keyName = ((ProperTeeParser.SpawnIdKeyContext) keyCtx).ID().getText();
-                // Duplicate check for static keys
-                for (SpawnSpec existing : collectedSpawns) {
-                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
-                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
-                    }
-                }
-            } else if (keyCtx instanceof ProperTeeParser.SpawnStringKeyContext) {
-                String raw = ((ProperTeeParser.SpawnStringKeyContext) keyCtx).STRING().getText();
+        ProperTeeParser.AccessContext accessCtx = ctx.access();
+        if (accessCtx != null) {
+            if (accessCtx instanceof ProperTeeParser.StaticAccessContext) {
+                keyName = ((ProperTeeParser.StaticAccessContext) accessCtx).ID().getText();
+            } else if (accessCtx instanceof ProperTeeParser.StringKeyAccessContext) {
+                String raw = ((ProperTeeParser.StringKeyAccessContext) accessCtx).STRING().getText();
                 keyName = processStringEscapes(raw.substring(1, raw.length() - 1));
-                // Duplicate check for static keys
-                for (SpawnSpec existing : collectedSpawns) {
-                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
-                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
-                    }
-                }
-            } else if (keyCtx instanceof ProperTeeParser.SpawnIntKeyContext) {
-                keyName = ((ProperTeeParser.SpawnIntKeyContext) keyCtx).INTEGER().getText();
-                // Duplicate check for static keys
-                for (SpawnSpec existing : collectedSpawns) {
-                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
-                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
-                    }
-                }
-            } else if (keyCtx instanceof ProperTeeParser.SpawnBoolKeyContext) {
-                keyName = keyCtx.getText();
-                // Duplicate check for static keys
-                for (SpawnSpec existing : collectedSpawns) {
-                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
-                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
-                    }
-                }
-            } else if (keyCtx instanceof ProperTeeParser.SpawnVarKeyContext) {
-                String varName = ((ProperTeeParser.SpawnVarKeyContext) keyCtx).varKey.getText();
+            } else if (accessCtx instanceof ProperTeeParser.ArrayAccessContext) {
+                keyName = ((ProperTeeParser.ArrayAccessContext) accessCtx).INTEGER().getText();
+            } else if (accessCtx instanceof ProperTeeParser.VarEvalAccessContext) {
+                String varName = ((ProperTeeParser.VarEvalAccessContext) accessCtx).ID().getText();
                 ScopeStack ss = getScopeStack();
                 Map<String, Object> vars = getVariables();
 
@@ -1443,9 +1417,15 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     }
                 }
                 keyName = resolveAndValidateDynamicKey(keyValue, ctx);
-            } else if (keyCtx instanceof ProperTeeParser.SpawnExprKeyContext) {
-                Object keyValue = eval(((ProperTeeParser.SpawnExprKeyContext) keyCtx).expression());
+            } else if (accessCtx instanceof ProperTeeParser.EvalAccessContext) {
+                Object keyValue = eval(((ProperTeeParser.EvalAccessContext) accessCtx).expression());
                 keyName = resolveAndValidateDynamicKey(keyValue, ctx);
+            }
+            // Duplicate key check
+            for (SpawnSpec existing : collectedSpawns) {
+                if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
+                    throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
+                }
             }
         }
 
