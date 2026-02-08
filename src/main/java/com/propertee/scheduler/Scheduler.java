@@ -149,17 +149,12 @@ public class Scheduler {
         parentThread.resultCollectionVarName = command.getResultVarName();
 
         // Pre-build the live result collection with Result.running() entries
+        // All keys are pre-resolved by the interpreter (no nulls)
         if (command.getResultVarName() != null) {
             Map<String, Object> collection = new LinkedHashMap<String, Object>();
-            int pos = 1;
             for (int i = 0; i < childIds.size(); i++) {
                 String keyName = resultKeyNames.get(i);
-                if (keyName != null) {
-                    collection.put(keyName, Result.running());
-                } else {
-                    collection.put("#" + pos, Result.running());
-                    pos++;
-                }
+                collection.put(keyName, Result.running());
             }
             parentThread.resultCollection = collection;
         }
@@ -172,23 +167,11 @@ public class Scheduler {
         if (parent == null) return;
 
         // Update the live result collection in-place
+        // All keys are pre-resolved by the interpreter (no nulls)
         if (parent.resultCollection != null) {
             int idx = parent.childIds.indexOf(childThread.id);
             if (idx >= 0) {
-                String keyName = parent.resultKeyNames.get(idx);
-                String key;
-                if (keyName != null) {
-                    key = keyName;
-                } else {
-                    // Count unnamed threads before this one to get position
-                    int pos = 1;
-                    for (int i = 0; i < idx; i++) {
-                        if (parent.resultKeyNames.get(i) == null) {
-                            pos++;
-                        }
-                    }
-                    key = "#" + pos;
-                }
+                String key = parent.resultKeyNames.get(idx);
                 if (childThread.state == ThreadState.ERROR) {
                     parent.resultCollection.put(key, Result.error(
                         childThread.error != null ? childThread.error.getMessage() : "Unknown thread error"));

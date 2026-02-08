@@ -1193,10 +1193,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             if (TypeChecker.isNumber(left) && TypeChecker.isNumber(right)) {
                 return TypeChecker.boxNumber(TypeChecker.toDouble(left) + TypeChecker.toDouble(right));
             }
-            if (TypeChecker.isString(left) && TypeChecker.isString(right)) {
-                return (String) left + (String) right;
+            if (TypeChecker.isString(left) || TypeChecker.isString(right)) {
+                return TypeChecker.toStringValue(left) + TypeChecker.toStringValue(right);
             }
-            throw createError("Addition requires both operands to be numbers or both to be strings. Got " +
+            throw createError("Addition requires numeric or string operands. Got " +
                 TypeChecker.typeOf(left) + " + " + TypeChecker.typeOf(right), ctx);
         }
         if ("-".equals(op)) {
@@ -1341,54 +1341,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     // --- SPAWN statements ---
 
-    @Override
-    public Object visitSpawnAssignStmt(ProperTeeParser.SpawnAssignStmtContext ctx) {
-        if (!inMultiSetup) {
-            throw createError("thread can only be used inside multi blocks", ctx);
-        }
-        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
-        String funcName = funcCallCtx.funcName.getText();
-        String keyName = ctx.ID().getText();
-
-        // Duplicate key check
-        for (SpawnSpec existing : collectedSpawns) {
-            if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
-                throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
-            }
-        }
-
-        // Evaluate arguments now (during setup phase)
-        List<Object> args = new ArrayList<Object>();
-        if (funcCallCtx.expression() != null) {
-            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
-                args.add(eval(exprCtx));
-            }
-        }
-
-        collectedSpawns.add(new SpawnSpec(funcName, args, keyName, funcCallCtx));
-        return null;
-    }
-
-    @Override
-    public Object visitSpawnCallStmt(ProperTeeParser.SpawnCallStmtContext ctx) {
-        if (!inMultiSetup) {
-            throw createError("thread can only be used inside multi blocks", ctx);
-        }
-        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
-        String funcName = funcCallCtx.funcName.getText();
-
-        // Evaluate arguments now (during setup phase)
-        List<Object> args = new ArrayList<Object>();
-        if (funcCallCtx.expression() != null) {
-            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
-                args.add(eval(exprCtx));
-            }
-        }
-
-        collectedSpawns.add(new SpawnSpec(funcName, args, null, funcCallCtx));
-        return null;
-    }
-
     private String resolveAndValidateDynamicKey(Object keyValue, org.antlr.v4.runtime.ParserRuleContext ctx) {
         if (!(keyValue instanceof String)) {
             throw createError("Dynamic thread key must be a string, got " + TypeChecker.typeOf(keyValue), ctx);
@@ -1406,60 +1358,83 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return key;
     }
 
-    @Override
-    public Object visitSpawnVarKeyStmt(ProperTeeParser.SpawnVarKeyStmtContext ctx) {
-        if (!inMultiSetup) {
-            throw createError("thread can only be used inside multi blocks", ctx);
-        }
-        ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
-        String funcName = funcCallCtx.funcName.getText();
-
-        // Resolve the variable for the key
-        String varName = ctx.varKey.getText();
-        ScopeStack ss = getScopeStack();
-        Map<String, Object> vars = getVariables();
-
-        Object keyValue = ss.get(varName);
-        if (keyValue == ScopeStack.UNDEFINED) {
-            if (isInFunctionScope()) {
-                throw createError(
-                    "Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.",
-                    ctx);
-            }
-            if (vars.containsKey(varName)) {
-                keyValue = vars.get(varName);
-            } else if (properties.containsKey(varName)) {
-                keyValue = properties.get(varName);
+    private String processStringEscapes(String raw) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '\\' && i + 1 < raw.length()) {
+                char next = raw.charAt(i + 1);
+                switch (next) {
+                    case 'n': sb.append('\n'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'r': sb.append('\r'); break;
+                    case '\\': sb.append('\\'); break;
+                    case '"': sb.append('"'); break;
+                    default: sb.append('\\'); sb.append(next); break;
+                }
+                i++;
             } else {
-                throw createError("Variable '" + varName + "' is not defined", ctx);
+                sb.append(c);
             }
         }
-
-        String keyName = resolveAndValidateDynamicKey(keyValue, ctx);
-
-        // Evaluate arguments now (during setup phase)
-        List<Object> args = new ArrayList<Object>();
-        if (funcCallCtx.expression() != null) {
-            for (ProperTeeParser.ExpressionContext exprCtx : funcCallCtx.expression()) {
-                args.add(eval(exprCtx));
-            }
-        }
-
-        collectedSpawns.add(new SpawnSpec(funcName, args, keyName, funcCallCtx));
-        return null;
+        return sb.toString();
     }
 
     @Override
-    public Object visitSpawnExprKeyStmt(ProperTeeParser.SpawnExprKeyStmtContext ctx) {
+    public Object visitSpawnKeyStmt(ProperTeeParser.SpawnKeyStmtContext ctx) {
         if (!inMultiSetup) {
             throw createError("thread can only be used inside multi blocks", ctx);
         }
         ProperTeeParser.FunctionCallContext funcCallCtx = ctx.functionCall();
         String funcName = funcCallCtx.funcName.getText();
 
-        // Evaluate the expression for the key
-        Object keyValue = eval(ctx.expression());
-        String keyName = resolveAndValidateDynamicKey(keyValue, ctx);
+        // Resolve key
+        String keyName = null;
+        ProperTeeParser.SpawnKeyContext keyCtx = ctx.spawnKey();
+        if (keyCtx != null) {
+            if (keyCtx instanceof ProperTeeParser.SpawnIdKeyContext) {
+                keyName = ((ProperTeeParser.SpawnIdKeyContext) keyCtx).ID().getText();
+                // Duplicate check for static keys
+                for (SpawnSpec existing : collectedSpawns) {
+                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
+                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
+                    }
+                }
+            } else if (keyCtx instanceof ProperTeeParser.SpawnStringKeyContext) {
+                String raw = ((ProperTeeParser.SpawnStringKeyContext) keyCtx).STRING().getText();
+                keyName = processStringEscapes(raw.substring(1, raw.length() - 1));
+                // Duplicate check for static keys
+                for (SpawnSpec existing : collectedSpawns) {
+                    if (existing.resultKey != null && existing.resultKey.equals(keyName)) {
+                        throw createError("Duplicate result key '" + keyName + "' in multi block", ctx);
+                    }
+                }
+            } else if (keyCtx instanceof ProperTeeParser.SpawnVarKeyContext) {
+                String varName = ((ProperTeeParser.SpawnVarKeyContext) keyCtx).varKey.getText();
+                ScopeStack ss = getScopeStack();
+                Map<String, Object> vars = getVariables();
+
+                Object keyValue = ss.get(varName);
+                if (keyValue == ScopeStack.UNDEFINED) {
+                    if (isInFunctionScope()) {
+                        throw createError(
+                            "Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.",
+                            ctx);
+                    }
+                    if (vars.containsKey(varName)) {
+                        keyValue = vars.get(varName);
+                    } else if (properties.containsKey(varName)) {
+                        keyValue = properties.get(varName);
+                    } else {
+                        throw createError("Variable '" + varName + "' is not defined", ctx);
+                    }
+                }
+                keyName = resolveAndValidateDynamicKey(keyValue, ctx);
+            } else if (keyCtx instanceof ProperTeeParser.SpawnExprKeyContext) {
+                Object keyValue = eval(((ProperTeeParser.SpawnExprKeyContext) keyCtx).expression());
+                keyName = resolveAndValidateDynamicKey(keyValue, ctx);
+            }
+        }
 
         // Evaluate arguments now (during setup phase)
         List<Object> args = new ArrayList<Object>();
@@ -1508,6 +1483,29 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 }
             }
             return null;
+        }
+
+        // Resolve auto-keys for unnamed threads and check for collisions
+        Set<String> allKeys = new LinkedHashSet<String>();
+        int autoPos = 1;
+        for (int i = 0; i < collectedSpawns.size(); i++) {
+            SpawnSpec spawn = collectedSpawns.get(i);
+            if (spawn.resultKey != null) {
+                allKeys.add(spawn.resultKey);
+            }
+        }
+        for (int i = 0; i < collectedSpawns.size(); i++) {
+            SpawnSpec spawn = collectedSpawns.get(i);
+            if (spawn.resultKey == null) {
+                String autoKey = "#" + autoPos;
+                if (allKeys.contains(autoKey)) {
+                    throw createError("Auto-generated key '" + autoKey + "' conflicts with an explicit key in multi block", spawn.ctx);
+                }
+                allKeys.add(autoKey);
+                // Update the spawn's resultKey by replacing the entry
+                collectedSpawns.set(i, new SpawnSpec(spawn.funcName, spawn.args, autoKey, spawn.ctx));
+                autoPos++;
+            }
         }
 
         // Build thread specs from collected spawns

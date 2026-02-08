@@ -58,7 +58,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-There are 59 test pairs in `src/test/resources/tests/`. Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects. Test 47 (`spawn_outside_multi`) verifies `thread` outside multi block is a runtime error. Test 48 (`has_key`) verifies `HAS_KEY()` built-in function. Tests 49-54 cover multi result collection, dynamic spawn, auto keys, duplicate key error, LEN on maps, and map positional access. Test 55 (`thread_status_field`) verifies the `status` field on thread results. Test 56 (`monitor_reads_result`) verifies that monitor clauses can read thread result status during execution. Test 57 (`dynamic_thread_keys`) verifies `$var` and `$(expr)` dynamic key syntax in thread spawns. Test 58 verifies `#`-prefixed dynamic keys work. Tests 59-60 verify dynamic key error cases: non-string key type, and duplicate dynamic key.
+There are 60 test pairs in `src/test/resources/tests/` (numbered 01-61, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects. Test 47 (`spawn_outside_multi`) verifies `thread` outside multi block is a runtime error. Test 48 (`has_key`) verifies `HAS_KEY()` built-in function. Tests 49-54 cover multi result collection, dynamic spawn, auto keys, duplicate key error, LEN on maps, and map positional access. Test 55 (`thread_status_field`) verifies the `status` field on thread results. Test 56 (`monitor_reads_result`) verifies that monitor clauses can read thread result status during execution. Test 57 (`dynamic_thread_keys`) verifies `$var` and `$(expr)` dynamic key syntax in thread spawns. Test 58 verifies `#`-prefixed dynamic keys work. Tests 59-60 verify dynamic key error cases: non-string key type, and duplicate dynamic key. Test 61 (`duplicate_auto_key`) verifies that an explicit key colliding with an auto-generated `#N` key is a runtime error.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -114,10 +114,10 @@ interface Stepper {
 
 | File | Role |
 |---|---|
-| `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Dynamic thread keys via `$var` and `$(expr)`. |
-| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `thread` spawn visitors collect specs during multi setup. `eval()` for expressions, `createStepper()` for statements. Positional map access in `getProperty()`. `resolveAndValidateDynamicKey()` validates dynamic keys (must be string, non-empty, no duplicates). |
+| `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn syntax: `thread key: func()`, `thread "key": func()`, `thread $var: func()`, `thread $(expr): func()`, `thread : func()`. `spawnStmt` rule with `spawnKey` sub-rule. |
+| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). Single `visitSpawnKeyStmt` handles all spawn key types (ID, STRING, $var, $(expr), unnamed). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Positional map access in `getProperty()`. `resolveAndValidateDynamicKey()` validates dynamic keys (must be string, non-empty, no duplicates). |
 | `BuiltinFunctions.java` | 24 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for I/O functions with result pattern. `PrintFunction` interface takes `Object[]` args, not `String` |
-| `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (unnamed threads auto-keyed as `"#1"`, `"#2"`, etc. among unnamed only), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
+| `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships, `resultCollection` (live map updated in-place by scheduler) |
 | `TypeChecker.java` | Runtime type checks, number formatting, value formatting |
 | `ScopeStack.java` | Scope chain with UNDEFINED sentinel |
@@ -129,7 +129,7 @@ Functions spawned inside multi blocks are pure with respect to global state:
 - **Cannot write** globals — `::x = value` is a runtime error (enforced via `inThreadContext` flag set by Scheduler)
 - **Can call** any function (user-defined or built-in)
 - **Can create** and modify local variables freely (plain `x` without `::`)
-- **Return results** via `thread func() -> key` syntax as Result objects: `{status: "done", ok: true, value: <result>}` on success, `{status: "error", ok: false, value: "<error>"}` on error. Results are pre-built with `{status: "running", ok: false, value: {}}` at spawn time and updated in-place as threads complete. The monitor clause can read `resultVar.key.status` during execution. The collection is assigned to `resultVar` after all threads finish.
+- **Return results** via `thread key: func()` syntax as Result objects: `{status: "done", ok: true, value: <result>}` on success, `{status: "error", ok: false, value: "<error>"}` on error. Results are pre-built with `{status: "running", ok: false, value: {}}` at spawn time and updated in-place as threads complete. The monitor clause can read `resultVar.key.status` during execution. The collection is assigned to `resultVar` after all threads finish.
 - No locks, no shared mutable state
 
 ### Scope Resolution
@@ -168,7 +168,7 @@ The scheduler drives all execution — even single-threaded scripts run through 
 1. Creates child ThreadContexts from specs, each with `inThreadContext = true`
 2. Sets up monitor if present (stores interval, block ctx, child IDs in MonitorState, `lastRun` initialized to current time)
 3. Marks parent WAITING with child ID set
-4. Pre-builds `resultCollection` on parent with `Result.running()` entries (named keys use provided name, unnamed auto-keyed as `"#1"`, `"#2"`, etc. among unnamed)
+4. Pre-builds `resultCollection` on parent with `Result.running()` entries (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads)
 
 **Child completion** (`notifyChildCompleted()`):
 1. Updates parent's `resultCollection` in-place — `Result.ok()` or `Result.error()`
@@ -203,7 +203,7 @@ Per-thread state container. Constructor takes `(int id, String name, Stepper ste
 | `waitingForChildren` | `Set<Integer>` | `null` | Child IDs still running (null when not WAITING) |
 | `resultCollection` | `Map<String, Object>` | `null` | Live result map updated in-place as children complete |
 | `childIds` | `List<Integer>` | `null` | Ordered child thread IDs for this multi block |
-| `resultKeyNames` | `List<String>` | `null` | Parallel list of key names (null = unnamed, `"#N"` for auto-keyed) |
+| `resultKeyNames` | `List<String>` | `null` | Parallel list of key names (all pre-resolved by interpreter, including auto-keys `"#N"`) |
 | `resultCollectionVarName` | `String` | `null` | The `resultVar` name from `multi resultVar do` |
 | `collectedResults` | `Object` | `null` | Payload sent to parent stepper via `setSendValue()` when all children done |
 | `resultKeyName` | `String` | `null` | This child's key in parent's collection |
@@ -263,8 +263,8 @@ end
 // Parallel execution — results collected into result object
 // Each entry is {status: "done"/"error"/"running", ok: true/false, value: ...}
 multi result do
-    thread worker("A") -> a
-    thread worker("B") -> b
+    thread a: worker("A")
+    thread b: worker("B")
 monitor 100
     PRINT(result.a.status)   // "running" or "done" — monitor reads live status
 end
@@ -276,19 +276,19 @@ LEN(result)             // 2
 names = ["alpha", "beta"]
 multi result do
     loop name in names do
-        thread worker(name) -> $name           // key from variable
+        thread $name: worker(name)             // key from variable
     end
-    thread worker("C") -> $("gamma")           // key from expression
+    thread $("gamma"): worker("C")             // key from expression
 end
 
 // Conditional/dynamic spawning in multi blocks
 multi result do
     if needsA == true then
-        thread workerA() -> rA
+        thread rA: workerA()
     end
     i = 1
     loop i <= 3 infinite do
-        thread workerB(i)
+        thread : workerB(i)
         i = i + 1
     end
 end
@@ -339,7 +339,7 @@ end
 - **Collections** — use `LinkedHashMap<String, Object>` for objects (preserves insertion order), `ArrayList<Object>` for lists. The `Object` type represents all values at runtime.
 - `SLEEP()` returns a `SchedulerCommand` — the stepper yields it to the scheduler
 - 1-based indexing for array access (`.1` is the first element)
-- Strict type checking: no coercion, `and`/`or` require booleans, arithmetic requires numbers
+- Strict type checking: `and`/`or` require booleans, arithmetic requires numbers. Exception: `+` with at least one string coerces the other operand via `TO_STRING()` (concatenation)
 - Numbers: `Integer` for whole numbers, `Double` for decimals. Format helper strips `.0`
 - Division always produces `Double`
 - Semicolons are optional statement separators (treated as whitespace by the lexer)
