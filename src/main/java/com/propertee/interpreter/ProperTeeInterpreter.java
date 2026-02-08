@@ -621,7 +621,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             ((Map<String, Object>) target).put(String.valueOf(key), value);
         } else if (target instanceof List) {
             List<Object> list = (List<Object>) target;
-            int index = ((Number) key).intValue();
+            int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= list.size()) {
                 throw createError("Array index out of bounds", ctx);
             }
@@ -1056,12 +1056,13 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Object getProperty(Object target, Object key, org.antlr.v4.runtime.ParserRuleContext ctx) {
         if (target instanceof Map) {
             Map<String, Object> map = (Map<String, Object>) target;
-            // Positional access: .INTEGER on maps (0-based index from visitArrayAccess)
+            // Positional access: .INTEGER on maps (1-based from visitArrayAccess)
             if (key instanceof Number) {
-                int idx = ((Number) key).intValue();
+                int oneBased = ((Number) key).intValue();
+                int idx = oneBased - 1;
                 if (idx < 0 || idx >= map.size()) {
-                    if (ctx != null) throw createError("Map positional index out of bounds: " + (idx + 1), ctx);
-                    throw new ProperTeeError("Runtime Error: Map positional index out of bounds: " + (idx + 1));
+                    if (ctx != null) throw createError("Map positional index out of bounds: " + oneBased, ctx);
+                    throw new ProperTeeError("Runtime Error: Map positional index out of bounds: " + oneBased);
                 }
                 int i = 0;
                 for (Object val : map.values()) {
@@ -1078,7 +1079,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
         if (target instanceof List) {
             List<Object> list = (List<Object>) target;
-            int index = ((Number) key).intValue();
+            int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= list.size()) {
                 if (ctx != null) throw createError("Array index out of bounds", ctx);
                 throw new ProperTeeError("Runtime Error: Array index out of bounds");
@@ -1088,7 +1089,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         if (target instanceof String) {
             // String character access
             String s = (String) target;
-            int index = ((Number) key).intValue();
+            int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= s.length()) {
                 if (ctx != null) throw createError("String index out of bounds", ctx);
                 throw new ProperTeeError("Runtime Error: String index out of bounds");
@@ -1126,8 +1127,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitArrayAccess(ProperTeeParser.ArrayAccessContext ctx) {
-        int oneBased = Integer.parseInt(ctx.INTEGER().getText());
-        return oneBased - 1; // Convert to 0-based
+        return Integer.parseInt(ctx.INTEGER().getText()); // 1-based; getProperty/setProperty convert for arrays
     }
 
     @Override
