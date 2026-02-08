@@ -104,7 +104,7 @@ interface Stepper {
 | Package | Role |
 |---|---|
 | `com.propertee.cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
-| `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1540 lines), built-in functions, scope management, function definitions |
+| `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1610 lines), built-in functions, scope management, function definitions |
 | `com.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
 | `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
 | `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
@@ -115,7 +115,7 @@ interface Stepper {
 | File | Role |
 |---|---|
 | `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Dynamic thread keys via `$var` and `$(expr)`. |
-| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `thread` spawn visitors collect specs during multi setup. `eval()` for expressions, `createStepper()` for statements. Positional map access in `getProperty()`. |
+| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `thread` spawn visitors collect specs during multi setup. `eval()` for expressions, `createStepper()` for statements. Positional map access in `getProperty()`. `resolveAndValidateDynamicKey()` validates dynamic keys (must be string, non-empty, no duplicates). |
 | `BuiltinFunctions.java` | 24 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for I/O functions with result pattern. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (unnamed threads auto-keyed as `"#1"`, `"#2"`, etc. among unnamed only), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships, `resultCollection` (live map updated in-place by scheduler) |
@@ -146,10 +146,14 @@ The `::` prefix (`GLOBAL_PREFIX` token) bypasses local scopes and accesses globa
 
 The scheduler drives all execution — even single-threaded scripts run through it. Key mechanics:
 
+**Instance state**: `threads` (LinkedHashMap<Integer, ThreadContext>), `monitors` (ArrayList<MonitorState>), `nextThreadId` (counter), `currentThreadId` (for round-robin).
+
+**MonitorState** (inner class): `interval` (ms), `blockCtx`, `lastRun` (timestamp), `parentThreadId`, `childIds`.
+
 **Main loop** (`run()`):
 1. Creates thread 0 (main) with the root stepper
 2. Loop: `wakeThreads()` → `runMonitors()` → `selectNextThread()` → `step()` → `processStepResult()`
-3. When no READY threads exist: sleep-polls if SLEEPING threads remain, busy-waits if WAITING threads remain, otherwise exits
+3. When no READY threads exist: sleep-polls (capped at 50ms) if SLEEPING threads remain, busy-waits (1ms) if WAITING threads remain, otherwise exits
 4. Thread 0 errors propagate as exceptions; child thread errors go to stderr as `[THREAD ERROR]`
 
 **Thread selection** (`selectNextThread()`): Round-robin by sorted thread ID, starting after `currentThreadId`. Only picks READY threads.
@@ -162,7 +166,7 @@ The scheduler drives all execution — even single-threaded scripts run through 
 
 **Thread spawning** (`handleSpawnThreads()`):
 1. Creates child ThreadContexts from specs, each with `inThreadContext = true`
-2. Sets up monitor if present (stores interval, block ctx, child IDs)
+2. Sets up monitor if present (stores interval, block ctx, child IDs in MonitorState, `lastRun` initialized to current time)
 3. Marks parent WAITING with child ID set
 4. Pre-builds `resultCollection` on parent with `Result.running()` entries (named keys use provided name, unnamed auto-keyed as `"#1"`, `"#2"`, etc. among unnamed)
 
@@ -172,38 +176,40 @@ The scheduler drives all execution — even single-threaded scripts run through 
 3. When all children done: runs final monitor tick, removes monitor, sends `{resultVarName, collection}` payload to parent via `collectedResults`
 4. Parent wakes to READY; scheduler sends payload via `stepper.setSendValue()`
 
-**Monitor execution** (`executeMonitorSync()`): Creates a temporary ThreadContext (id -1) with `inMonitorContext = true`. Copies global snapshot and injects the live `resultCollection` under `resultCollectionVarName`. Runs the monitor block synchronously on the visitor. Monitor errors go to stderr, not thrown.
+**Monitor execution** (`runMonitors()` + `executeMonitorSync()`): Each scheduler iteration checks all monitors — fires when `(now - lastRun >= interval)`, updates `lastRun`. `executeMonitorSync()` creates a temporary ThreadContext (id -1, name "monitor") with `inMonitorContext = true`. Copies global snapshot and injects the live `resultCollection` under `resultCollectionVarName`. Runs the monitor block synchronously via `visitor.evalBlock()`. Monitor errors go to stderr as `[MONITOR ERROR]`, not thrown. `runFinalMonitor()` runs one last tick when all children complete, then removes the monitor.
 
 **Interpreter integration**: `visitor.activeThread` is set to the current thread before each step. The interpreter's `getScopeStack()`, `getVariables()`, `isInFunctionScope()` etc. all check `activeThread` to route scope access through the thread's local state.
 
 ### ThreadContext (`ThreadContext.java`)
 
-Per-thread state container. All fields are public (scheduler accesses them directly).
+Per-thread state container. Constructor takes `(int id, String name, Stepper stepper, Map<String, Object> globalSnapshot)`. All fields are public (scheduler accesses them directly).
 
-| Field | Type | Purpose |
-|---|---|---|
-| `id` | `int` | Unique thread ID (0 = main) |
-| `name` | `String` | Debug name (e.g. `"worker-0"`, `"main"`) |
-| `stepper` | `Stepper` | The stepper driving this thread's execution |
-| `state` | `ThreadState` | `READY → RUNNING → READY → ... → COMPLETED/ERROR` |
-| `scopeStack` | `ScopeStack` | Thread-private local variable scopes |
-| `globalSnapshot` | `Map<String, Object>` | Read-only globals for thread purity (main thread uses live `variables`) |
-| `sleepUntil` | `Long` | Absolute wake time (ms) when SLEEPING, null otherwise |
-| `inThreadContext` | `boolean` | True for child threads — blocks `::x = val` writes |
-| `inMonitorContext` | `boolean` | True for monitor execution — blocks all assignments |
-| `inMultiContext` | `boolean` | True during multi setup — blocks result var access |
-| `multiResultVars` | `Map<String, Object>` | Result variables from completed multi blocks (accessible in later code) |
-| `result` | `Object` | Final return value when COMPLETED |
-| `error` | `Throwable` | Exception when ERROR |
-| `parentId` | `Integer` | Parent thread ID (null for main) |
-| `waitingForChildren` | `Set<Integer>` | Child IDs still running (null when not WAITING) |
-| `resultCollection` | `Map<String, Object>` | Live result map updated in-place as children complete |
-| `childIds` | `List<Integer>` | Ordered child thread IDs for this multi block |
-| `resultKeyNames` | `List<String>` | Parallel list of key names (null = unnamed) |
-| `resultCollectionVarName` | `String` | The `resultVar` name from `multi resultVar do` |
-| `collectedResults` | `Object` | Payload sent to parent stepper when all children done |
-| `resultKeyName` | `String` | This child's key in parent's collection |
-| `localScope` | `Map<String, Object>` | Function parameters for spawned thread |
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `id` | `int` | (ctor) | Unique thread ID (0 = main, -1 = monitor) |
+| `name` | `String` | (ctor) | Debug name (e.g. `"worker-0"`, `"main"`, `"monitor"`) |
+| `stepper` | `Stepper` | (ctor) | The stepper driving this thread's execution |
+| `state` | `ThreadState` | `READY` | `READY → RUNNING → READY → ... → COMPLETED/ERROR` |
+| `scopeStack` | `ScopeStack` | `new ScopeStack()` | Thread-private local variable scopes |
+| `globalSnapshot` | `Map<String, Object>` | (ctor) | Read-only globals for thread purity (main thread uses live `variables`) |
+| `sleepUntil` | `Long` | `null` | Absolute wake time (ms) when SLEEPING |
+| `inThreadContext` | `boolean` | `false` | True for child threads — blocks `::x = val` writes |
+| `inMonitorContext` | `boolean` | `false` | True for monitor execution — blocks all assignments |
+| `inMultiContext` | `boolean` | `false` | True during multi setup — blocks result var access |
+| `multiResultVars` | `Map<String, Object>` | `{}` | Result variables from completed multi blocks (accessible in later code) |
+| `result` | `Object` | `null` | Final return value when COMPLETED |
+| `error` | `Throwable` | `null` | Exception when ERROR |
+| `parentId` | `Integer` | `null` | Parent thread ID (null for main) |
+| `waitingForChildren` | `Set<Integer>` | `null` | Child IDs still running (null when not WAITING) |
+| `resultCollection` | `Map<String, Object>` | `null` | Live result map updated in-place as children complete |
+| `childIds` | `List<Integer>` | `null` | Ordered child thread IDs for this multi block |
+| `resultKeyNames` | `List<String>` | `null` | Parallel list of key names (null = unnamed, `"#N"` for auto-keyed) |
+| `resultCollectionVarName` | `String` | `null` | The `resultVar` name from `multi resultVar do` |
+| `collectedResults` | `Object` | `null` | Payload sent to parent stepper via `setSendValue()` when all children done |
+| `resultKeyName` | `String` | `null` | This child's key in parent's collection |
+| `localScope` | `Map<String, Object>` | `null` | Function parameters for spawned thread |
+
+Methods: `markRunning()`, `markReady()`, `markSleeping(long)`, `markWaiting(List<Integer>)`, `markCompleted(Object)`, `markError(Throwable)`, `shouldWake(long)`, `childCompleted(int)` → returns true when all children done.
 
 **ThreadState transitions:**
 ```
