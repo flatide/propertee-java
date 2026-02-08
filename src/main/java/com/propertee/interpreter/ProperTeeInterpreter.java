@@ -1344,7 +1344,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     private String resolveAndValidateDynamicKey(Object keyValue, org.antlr.v4.runtime.ParserRuleContext ctx) {
         String key = TypeChecker.toStringValue(keyValue);
         if (key.isEmpty()) {
-            throw createError("Dynamic thread key must not be empty", ctx);
+            return null; // treat empty as unnamed (auto-keyed)
         }
         // Duplicate key check
         for (SpawnSpec existing : collectedSpawns) {
