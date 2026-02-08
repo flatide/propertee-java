@@ -18,6 +18,11 @@ ProperTee Java is a Java implementation of the [ProperTee](https://github.com/fl
 ./gradlew jar                     # create fat JAR (build/libs/propertee-java.jar)
 ./gradlew test                    # run JUnit tests
 
+# Dual-target fat JARs:
+./gradlew jar7                    # Java 7 fat JAR → build/libs/propertee-java-java7.jar
+./gradlew jar8                    # Java 8 fat JAR → build/libs/propertee-java-java8.jar
+./gradlew jarAll                  # Both JARs
+
 # Run a script via Gradle
 ./gradlew run --args="sample/01_hello.pt"
 ```

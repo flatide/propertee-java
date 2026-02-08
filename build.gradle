@@ -109,8 +109,8 @@ task jar8(type: Jar) {
 }
 
 task jarAll {
-    dependsOn jar7, jar8
-    description = 'Build both Java 7 and Java 8 fat JARs'
+    dependsOn jar, jar7, jar8
+    description = 'Build all fat JARs (default, Java 7, Java 8)'
     group = 'build'
 }
 
