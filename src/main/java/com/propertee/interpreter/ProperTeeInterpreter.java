@@ -1393,7 +1393,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 keyName = ((ProperTeeParser.StaticAccessContext) accessCtx).ID().getText();
             } else if (accessCtx instanceof ProperTeeParser.StringKeyAccessContext) {
                 String raw = ((ProperTeeParser.StringKeyAccessContext) accessCtx).STRING().getText();
-                keyName = processStringEscapes(raw.substring(1, raw.length() - 1));
+                String key = processStringEscapes(raw.substring(1, raw.length() - 1));
+                keyName = key.isEmpty() ? null : key; // empty string treated as unnamed
             } else if (accessCtx instanceof ProperTeeParser.ArrayAccessContext) {
                 keyName = ((ProperTeeParser.ArrayAccessContext) accessCtx).INTEGER().getText();
             } else if (accessCtx instanceof ProperTeeParser.VarEvalAccessContext) {
