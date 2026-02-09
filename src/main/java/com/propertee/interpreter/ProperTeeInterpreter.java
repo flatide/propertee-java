@@ -1111,6 +1111,15 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     public Object visitVarEvalAccess(ProperTeeParser.VarEvalAccessContext ctx) {
         String varName = ctx.ID().getText();
+
+        // $::var — resolve from globals/properties directly (same as ::var)
+        if (ctx.GLOBAL_PREFIX() != null) {
+            Map<String, Object> vars = getVariables();
+            if (vars.containsKey(varName)) return vars.get(varName);
+            if (properties.containsKey(varName)) return properties.get(varName);
+            return null;
+        }
+
         ScopeStack ss = getScopeStack();
         Map<String, Object> vars = getVariables();
 
@@ -1398,23 +1407,38 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             } else if (accessCtx instanceof ProperTeeParser.ArrayAccessContext) {
                 keyName = ((ProperTeeParser.ArrayAccessContext) accessCtx).INTEGER().getText();
             } else if (accessCtx instanceof ProperTeeParser.VarEvalAccessContext) {
-                String varName = ((ProperTeeParser.VarEvalAccessContext) accessCtx).ID().getText();
-                ScopeStack ss = getScopeStack();
-                Map<String, Object> vars = getVariables();
+                ProperTeeParser.VarEvalAccessContext varCtx = (ProperTeeParser.VarEvalAccessContext) accessCtx;
+                String varName = varCtx.ID().getText();
+                Object keyValue;
 
-                Object keyValue = ss.get(varName);
-                if (keyValue == ScopeStack.UNDEFINED) {
-                    if (isInFunctionScope()) {
-                        throw createError(
-                            "Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.",
-                            ctx);
-                    }
+                if (varCtx.GLOBAL_PREFIX() != null) {
+                    // $::var — resolve from globals/properties directly
+                    Map<String, Object> vars = getVariables();
                     if (vars.containsKey(varName)) {
                         keyValue = vars.get(varName);
                     } else if (properties.containsKey(varName)) {
                         keyValue = properties.get(varName);
                     } else {
                         throw createError("Variable '" + varName + "' is not defined", ctx);
+                    }
+                } else {
+                    ScopeStack ss = getScopeStack();
+                    Map<String, Object> vars = getVariables();
+
+                    keyValue = ss.get(varName);
+                    if (keyValue == ScopeStack.UNDEFINED) {
+                        if (isInFunctionScope()) {
+                            throw createError(
+                                "Variable '" + varName + "' is not defined in local scope. Use ::" + varName + " to access the global variable.",
+                                ctx);
+                        }
+                        if (vars.containsKey(varName)) {
+                            keyValue = vars.get(varName);
+                        } else if (properties.containsKey(varName)) {
+                            keyValue = properties.get(varName);
+                        } else {
+                            throw createError("Variable '" + varName + "' is not defined", ctx);
+                        }
                     }
                 }
                 keyName = resolveAndValidateDynamicKey(keyValue, ctx);
