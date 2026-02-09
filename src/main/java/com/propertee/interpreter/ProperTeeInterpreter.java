@@ -1027,12 +1027,74 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitArrayLiteral(ProperTeeParser.ArrayLiteralContext ctx) {
+    public Object visitListArray(ProperTeeParser.ListArrayContext ctx) {
         List<Object> arr = new ArrayList<Object>();
         if (ctx.expression() == null) return arr;
 
         for (ProperTeeParser.ExpressionContext exprCtx : ctx.expression()) {
             arr.add(eval(exprCtx));
+        }
+        return arr;
+    }
+
+    @Override
+    public Object visitRangeArray(ProperTeeParser.RangeArrayContext ctx) {
+        Object startVal = eval(ctx.rangeStart);
+        Object endVal = eval(ctx.rangeEnd);
+
+        if (!(startVal instanceof Number) || !(endVal instanceof Number)) {
+            throw createError("Range bounds must be numbers", ctx);
+        }
+
+        double start = ((Number) startVal).doubleValue();
+        double end = ((Number) endVal).doubleValue();
+
+        double step;
+        if (ctx.rangeStep != null) {
+            Object stepVal = eval(ctx.rangeStep);
+            if (!(stepVal instanceof Number)) {
+                throw createError("Range step must be a number", ctx);
+            }
+            step = ((Number) stepVal).doubleValue();
+            if (step <= 0) {
+                throw createError("Range step must be positive", ctx);
+            }
+        } else {
+            step = 1.0;
+        }
+
+        // Negate step when descending
+        if (start > end) {
+            step = -step;
+        }
+
+        boolean useIntegers = (startVal instanceof Integer) && (endVal instanceof Integer)
+                && (ctx.rangeStep == null || eval(ctx.rangeStep) instanceof Integer);
+
+        List<Object> arr = new ArrayList<Object>();
+        if (useIntegers) {
+            int s = (Integer) startVal;
+            int e = (Integer) endVal;
+            int st = (int) step;
+            if (st > 0) {
+                for (int i = s; i <= e; i += st) arr.add(i);
+            } else {
+                for (int i = s; i >= e; i += st) arr.add(i);
+            }
+        } else {
+            if (step > 0) {
+                for (double v = start; v <= end + 1e-9; v += step) {
+                    v = Math.round(v * 1e12) / 1e12;
+                    if (v > end + 1e-9) break;
+                    arr.add(TypeChecker.boxNumber(v));
+                }
+            } else {
+                for (double v = start; v >= end - 1e-9; v += step) {
+                    v = Math.round(v * 1e12) / 1e12;
+                    if (v < end - 1e-9) break;
+                    arr.add(TypeChecker.boxNumber(v));
+                }
+            }
         }
         return arr;
     }

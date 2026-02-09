@@ -75,7 +75,9 @@ public class ScriptTest {
             "58_dynamic_key_digit_error",
             "59_dynamic_key_type_error",
             "60_dynamic_key_duplicate",
-            "61_duplicate_auto_key"
+            "61_duplicate_auto_key",
+            "62_range_array",
+            "63_range_step_zero"
         };
 
         for (String name : testNames) {
