@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.propertee.tests.ScriptTest" tests="60" skipped="0" failures="0" errors="0" timestamp="2026-02-08T13:53:33Z" hostname="Journeys-Mac-mini.local" time="0.648">
+  <properties/>
+  <testcase name="testScript[01_variables_types]" classname="com.propertee.tests.ScriptTest" time="0.058"/>
+  <testcase name="testScript[02_arithmetic]" classname="com.propertee.tests.ScriptTest" time="0.013"/>
+  <testcase name="testScript[03_comparisons_logic]" classname="com.propertee.tests.ScriptTest" time="0.008"/>
+  <testcase name="testScript[04_if_else]" classname="com.propertee.tests.ScriptTest" time="0.003"/>
+  <testcase name="testScript[05_condition_loop]" classname="com.propertee.tests.ScriptTest" time="0.003"/>
+  <testcase name="testScript[06_value_loop]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[07_keyvalue_loop]" classname="com.propertee.tests.ScriptTest" time="0.004"/>
+  <testcase name="testScript[08_break_continue]" classname="com.propertee.tests.ScriptTest" time="0.004"/>
+  <testcase name="testScript[09_functions]" classname="com.propertee.tests.ScriptTest" time="0.006"/>
+  <testcase name="testScript[10_recursion]" classname="com.propertee.tests.ScriptTest" time="0.012"/>
+  <testcase name="testScript[11_arrays]" classname="com.propertee.tests.ScriptTest" time="0.005"/>
+  <testcase name="testScript[12_objects]" classname="com.propertee.tests.ScriptTest" time="0.003"/>
+  <testcase name="testScript[13_strings]" classname="com.propertee.tests.ScriptTest" time="0.005"/>
+  <testcase name="testScript[14_scope]" classname="com.propertee.tests.ScriptTest" time="0.003"/>
+  <testcase name="testScript[15_nested_loops]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[16_thread_basic]" classname="com.propertee.tests.ScriptTest" time="0.004"/>
+  <testcase name="testScript[17_thread_results]" classname="com.propertee.tests.ScriptTest" time="0.004"/>
+  <testcase name="testScript[18_thread_global_snapshot]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[19_thread_sleep]" classname="com.propertee.tests.ScriptTest" time="0.107"/>
+  <testcase name="testScript[20_thread_monitor]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[21_thread_no_result]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[22_thread_calling_thread]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[23_error_type_mismatch]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[24_error_undefined_var]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[25_error_undefined_func]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[26_error_div_zero]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[27_error_null_access]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[28_error_not_boolean]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[29_error_loop_limit]" classname="com.propertee.tests.ScriptTest" time="0.004"/>
+  <testcase name="testScript[30_thread_local_scope]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[32_error_monitor_assign]" classname="com.propertee.tests.ScriptTest" time="0.056"/>
+  <testcase name="testScript[33_complex_expressions]" classname="com.propertee.tests.ScriptTest" time="0.007"/>
+  <testcase name="testScript[34_builtin_properties]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[35_object_computed_keys]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[36_function_with_loops]" classname="com.propertee.tests.ScriptTest" time="0.004"/>
+  <testcase name="testScript[37_thread_with_loops]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[38_many_threads]" classname="com.propertee.tests.ScriptTest" time="0.003"/>
+  <testcase name="testScript[39_escape_strings]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[40_multi_after_multi]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[41_result_pattern]" classname="com.propertee.tests.ScriptTest" time="0.007"/>
+  <testcase name="testScript[42_global_prefix]" classname="com.propertee.tests.ScriptTest" time="0.006"/>
+  <testcase name="testScript[43_global_prefix_error]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[44_global_prefix_thread]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[45_global_prefix_thread_error]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[46_thread_error_result]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[47_spawn_outside_multi]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[48_has_key]" classname="com.propertee.tests.ScriptTest" time="0.005"/>
+  <testcase name="testScript[49_multi_result_collection]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[50_multi_dynamic_spawn]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[51_multi_auto_keys]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[52_multi_duplicate_key_error]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[53_len_on_maps]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[54_map_positional_access]" classname="com.propertee.tests.ScriptTest" time="0.005"/>
+  <testcase name="testScript[55_thread_status_field]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[56_monitor_reads_result]" classname="com.propertee.tests.ScriptTest" time="0.258"/>
+  <testcase name="testScript[57_dynamic_thread_keys]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[58_dynamic_key_digit_error]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <testcase name="testScript[59_dynamic_key_type_error]" classname="com.propertee.tests.ScriptTest" time="0.002"/>
+  <testcase name="testScript[60_dynamic_key_duplicate]" classname="com.propertee.tests.ScriptTest" time="0.0"/>
+  <testcase name="testScript[61_duplicate_auto_key]" classname="com.propertee.tests.ScriptTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
