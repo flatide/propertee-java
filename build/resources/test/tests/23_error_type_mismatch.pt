@@ -1,4 +1,0 @@
-// Test: Type error - adding boolean + boolean should error
-x = true
-y = false
-PRINT(x + y)

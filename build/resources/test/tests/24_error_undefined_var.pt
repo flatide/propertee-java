@@ -1,2 +1,0 @@
-// Test: Accessing undefined variable should error
-PRINT(nonexistent)

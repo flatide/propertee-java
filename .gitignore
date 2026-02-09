@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 !gradle/wrapper/gradle-wrapper.jar
+build/
 
 # IDE
 .idea/

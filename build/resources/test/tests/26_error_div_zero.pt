@@ -1,2 +1,0 @@
-// Test: Division by zero should error
-x = 10 / 0
