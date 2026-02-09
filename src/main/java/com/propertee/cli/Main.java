@@ -21,6 +21,8 @@ import java.util.*;
 
 public class Main {
 
+    public static final String VERSION = "0.1.0";
+
     private static class ErrorCollector extends BaseErrorListener {
         List<String> errors = new ArrayList<String>();
 
@@ -84,6 +86,9 @@ public class Main {
                 maxIterations = Integer.parseInt(args[++i]);
             } else if ("--warn-loops".equals(args[i])) {
                 iterationLimitBehavior = "warn";
+            } else if ("-v".equals(args[i]) || "--version".equals(args[i])) {
+                System.out.println("ProperTee " + VERSION);
+                System.exit(0);
             } else if ("-h".equals(args[i]) || "--help".equals(args[i])) {
                 System.out.println("Usage: java -jar propertee.jar [options] [script.pt]");
                 System.out.println();
@@ -92,6 +97,7 @@ public class Main {
                 System.out.println("  -f, --props-file <f>  Built-in properties from JSON file");
                 System.out.println("  --max-iterations <n>  Max loop iterations (default: 1000)");
                 System.out.println("  --warn-loops          Warn instead of error on loop limit");
+                System.out.println("  -v, --version         Show version");
                 System.out.println("  -h, --help            Show this help");
                 System.exit(0);
             } else {

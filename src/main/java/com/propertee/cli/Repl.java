@@ -27,7 +27,7 @@ public class Repl {
     }
 
     public void run() {
-        System.out.println("ProperTee Interactive Mode");
+        System.out.println("ProperTee " + Main.VERSION + " Interactive Mode");
         System.out.println("Type ProperTee statements. Multi-line blocks auto-detected (do/end, if/end, multi/end).");
         System.out.println("Type .exit to quit, .vars to show variables.\n");
 
