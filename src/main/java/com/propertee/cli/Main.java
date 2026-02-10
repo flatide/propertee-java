@@ -21,7 +21,7 @@ import java.util.*;
 
 public class Main {
 
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.2.0";
 
     private static class ErrorCollector extends BaseErrorListener {
         List<String> errors = new ArrayList<String>();
