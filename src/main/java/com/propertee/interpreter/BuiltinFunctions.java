@@ -4,6 +4,7 @@ import com.propertee.runtime.ProperTeeError;
 import com.propertee.runtime.TypeChecker;
 import com.propertee.stepper.SchedulerCommand;
 
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class BuiltinFunctions {
@@ -309,6 +310,50 @@ public class BuiltinFunctions {
                 if (!(key instanceof String))
                     throw new ProperTeeError("Runtime Error: HAS_KEY() second argument must be a string");
                 return ((Map<String, Object>) obj).containsKey((String) key);
+            }
+        });
+
+        final Random rng = new Random();
+        functions.put("RANDOM", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty()) {
+                    return rng.nextDouble();
+                } else if (args.size() == 1) {
+                    if (!TypeChecker.isNumber(args.get(0)))
+                        throw new ProperTeeError("Runtime Error: RANDOM() argument must be a number");
+                    int max = (int) TypeChecker.toDouble(args.get(0));
+                    if (max <= 0) throw new ProperTeeError("Runtime Error: RANDOM() max must be positive");
+                    return rng.nextInt(max);
+                } else {
+                    if (!TypeChecker.isNumber(args.get(0)) || !TypeChecker.isNumber(args.get(1)))
+                        throw new ProperTeeError("Runtime Error: RANDOM() arguments must be numbers");
+                    int min = (int) TypeChecker.toDouble(args.get(0));
+                    int max = (int) TypeChecker.toDouble(args.get(1));
+                    if (min > max) throw new ProperTeeError("Runtime Error: RANDOM() min cannot be greater than max");
+                    return min + rng.nextInt(max - min + 1);
+                }
+            }
+        });
+
+        functions.put("MILTIME", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return TypeChecker.boxNumber((double) System.currentTimeMillis());
+            }
+        });
+
+        functions.put("DATE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return new SimpleDateFormat("yyyy-MM-dd").format(new Date());
+            }
+        });
+
+        functions.put("TIME", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return new SimpleDateFormat("HH:mm:ss").format(new Date());
             }
         });
     }
