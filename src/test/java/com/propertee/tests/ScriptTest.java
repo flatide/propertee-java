@@ -78,7 +78,8 @@ public class ScriptTest {
             "61_duplicate_auto_key",
             "62_range_array",
             "63_range_step_zero",
-            "64_time_functions"
+            "64_time_functions",
+            "65_keys"
         };
 
         for (String name : testNames) {

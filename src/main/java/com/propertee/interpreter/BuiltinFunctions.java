@@ -313,6 +313,17 @@ public class BuiltinFunctions {
             }
         });
 
+        functions.put("KEYS", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                Object obj = args.get(0);
+                if (!(obj instanceof Map))
+                    throw new ProperTeeError("Runtime Error: KEYS() argument must be an object");
+                return new ArrayList<Object>(((Map<String, Object>) obj).keySet());
+            }
+        });
+
         final Random rng = new Random();
         functions.put("RANDOM", new BuiltinFunction() {
             @Override
