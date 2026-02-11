@@ -1118,20 +1118,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Object getProperty(Object target, Object key, org.antlr.v4.runtime.ParserRuleContext ctx) {
         if (target instanceof Map) {
             Map<String, Object> map = (Map<String, Object>) target;
-            // Positional access: .INTEGER on maps (1-based from visitArrayAccess)
-            if (key instanceof Number) {
-                int oneBased = ((Number) key).intValue();
-                int idx = oneBased - 1;
-                if (idx < 0 || idx >= map.size()) {
-                    if (ctx != null) throw createError("Map positional index out of bounds: " + oneBased, ctx);
-                    throw new ProperTeeError("Runtime Error: Map positional index out of bounds: " + oneBased);
-                }
-                int i = 0;
-                for (Object val : map.values()) {
-                    if (i == idx) return val;
-                    i++;
-                }
-            }
             String strKey = String.valueOf(key);
             if (!map.containsKey(strKey)) {
                 if (ctx != null) throw createError("Property '" + key + "' does not exist", ctx);
