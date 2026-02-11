@@ -79,7 +79,9 @@ public class ScriptTest {
             "62_range_array",
             "63_range_step_zero",
             "64_time_functions",
-            "65_keys"
+            "65_keys",
+            "66_sort",
+            "67_sort_errors"
         };
 
         for (String name : testNames) {

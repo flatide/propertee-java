@@ -324,6 +324,100 @@ public class BuiltinFunctions {
             }
         });
 
+        functions.put("SORT", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                Object first = args.get(0);
+                if (!(first instanceof List))
+                    throw new ProperTeeError("Runtime Error: SORT() requires an array argument");
+                List<Object> arr = new ArrayList<Object>((List<Object>) first);
+                if (arr.size() <= 1) return arr;
+                validateHomogeneous(arr, "SORT");
+                Collections.sort(arr, new Comparator<Object>() {
+                    @Override
+                    public int compare(Object a, Object b) {
+                        return compareValues(a, b);
+                    }
+                });
+                return arr;
+            }
+        });
+
+        functions.put("SORT_DESC", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                Object first = args.get(0);
+                if (!(first instanceof List))
+                    throw new ProperTeeError("Runtime Error: SORT_DESC() requires an array argument");
+                List<Object> arr = new ArrayList<Object>((List<Object>) first);
+                if (arr.size() <= 1) return arr;
+                validateHomogeneous(arr, "SORT_DESC");
+                Collections.sort(arr, new Comparator<Object>() {
+                    @Override
+                    public int compare(Object a, Object b) {
+                        return compareValues(b, a);
+                    }
+                });
+                return arr;
+            }
+        });
+
+        functions.put("SORT_BY", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                Object first = args.get(0);
+                if (!(first instanceof List))
+                    throw new ProperTeeError("Runtime Error: SORT_BY() requires an array argument");
+                if (!(args.get(1) instanceof String))
+                    throw new ProperTeeError("Runtime Error: SORT_BY() second argument must be a string key");
+                final String key = (String) args.get(1);
+                List<Object> arr = new ArrayList<Object>((List<Object>) first);
+                if (arr.size() <= 1) return arr;
+                validateKeyExists(arr, key, "SORT_BY");
+                Collections.sort(arr, new Comparator<Object>() {
+                    @Override
+                    public int compare(Object a, Object b) {
+                        return compareValues(getMapValue(a, key), getMapValue(b, key));
+                    }
+                });
+                return arr;
+            }
+        });
+
+        functions.put("SORT_BY_DESC", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                Object first = args.get(0);
+                if (!(first instanceof List))
+                    throw new ProperTeeError("Runtime Error: SORT_BY_DESC() requires an array argument");
+                if (!(args.get(1) instanceof String))
+                    throw new ProperTeeError("Runtime Error: SORT_BY_DESC() second argument must be a string key");
+                final String key = (String) args.get(1);
+                List<Object> arr = new ArrayList<Object>((List<Object>) first);
+                if (arr.size() <= 1) return arr;
+                validateKeyExists(arr, key, "SORT_BY_DESC");
+                Collections.sort(arr, new Comparator<Object>() {
+                    @Override
+                    public int compare(Object a, Object b) {
+                        return compareValues(getMapValue(b, key), getMapValue(a, key));
+                    }
+                });
+                return arr;
+            }
+        });
+
+        functions.put("REVERSE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                Object first = args.get(0);
+                if (!(first instanceof List))
+                    throw new ProperTeeError("Runtime Error: REVERSE() requires an array argument");
+                List<Object> arr = new ArrayList<Object>((List<Object>) first);
+                Collections.reverse(arr);
+                return arr;
+            }
+        });
+
         final Random rng = new Random();
         functions.put("RANDOM", new BuiltinFunction() {
             @Override
@@ -387,6 +481,43 @@ public class BuiltinFunctions {
      * or throw an exception which is automatically caught and wrapped as
      * {ok: false, value: "error message"}.
      */
+    private static void validateHomogeneous(List<Object> arr, String funcName) {
+        boolean allNumbers = true;
+        boolean allStrings = true;
+        for (Object item : arr) {
+            if (!(item instanceof Number)) allNumbers = false;
+            if (!(item instanceof String)) allStrings = false;
+        }
+        if (!allNumbers && !allStrings) {
+            throw new ProperTeeError("Runtime Error: " + funcName + "() requires all elements to be the same type (number or string)");
+        }
+    }
+
+    private static void validateKeyExists(List<Object> arr, String key, String funcName) {
+        for (int i = 0; i < arr.size(); i++) {
+            Object item = arr.get(i);
+            if (!(item instanceof Map)) {
+                throw new ProperTeeError("Runtime Error: " + funcName + "() requires an array of objects");
+            }
+            if (!((Map<?, ?>) item).containsKey(key)) {
+                throw new ProperTeeError("Runtime Error: Property '" + key + "' does not exist in array element at index " + (i + 1));
+            }
+        }
+    }
+
+    private static Object getMapValue(Object obj, String key) {
+        return ((Map<?, ?>) obj).get(key);
+    }
+
+    private static int compareValues(Object a, Object b) {
+        if (a instanceof Number && b instanceof Number) {
+            double da = ((Number) a).doubleValue();
+            double db = ((Number) b).doubleValue();
+            return Double.compare(da, db);
+        }
+        return ((String) a).compareTo((String) b);
+    }
+
     public void registerExternal(String name, final BuiltinFunction func) {
         functions.put(name, new BuiltinFunction() {
             @Override
