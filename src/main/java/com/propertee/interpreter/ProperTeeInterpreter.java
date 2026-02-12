@@ -1018,7 +1018,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     }
 
     private String resolveObjectKey(ProperTeeParser.ObjectKeyContext ctx) {
-        if (ctx.ID() != null) return ctx.ID().getText();
         if (ctx.STRING() != null) {
             String str = ctx.STRING().getText();
             return str.substring(1, str.length() - 1);
