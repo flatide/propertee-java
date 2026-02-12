@@ -895,6 +895,12 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         throw new ReturnException(value);
     }
 
+    @Override
+    public Object visitDebugStmt(ProperTeeParser.DebugStmtContext ctx) {
+        // No-op in normal execution; playground debug mode handles this in the scheduler
+        return new LinkedHashMap<String, Object>();
+    }
+
     // --- Function definition ---
 
     @Override

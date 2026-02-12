@@ -83,7 +83,8 @@ public class ScriptTest {
             "66_sort",
             "67_sort_errors",
             "68_cow_semantics",
-            "69_thread_isolation"
+            "69_thread_isolation",
+            "70_debug_statement"
         };
 
         for (String name : testNames) {
