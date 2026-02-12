@@ -2,7 +2,7 @@
 
 A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
 
-For language specification, syntax reference, and built-in functions, see the [ProperTee Language Home](https://github.com/flatide/ProperTee). For detailed runtime semantics (types, scoping, operators, threading), see [LANGUAGE.md](LANGUAGE.md).
+For language specification, syntax reference, and built-in functions, see the [ProperTee Language Home](https://github.com/flatide/ProperTee). For detailed runtime semantics (types, scoping, operators, threading), see [LANGUAGE.md](LANGUAGE.md). See the [Changelog](LANGUAGE.md#changelog) for what's new.
 
 **Runtime compatibility:** Java 7+ (no lambdas, no streams, no Java 8 APIs)
 
