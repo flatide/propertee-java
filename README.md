@@ -1,4 +1,4 @@
-# ProperTee for Java
+# ProperTee for Java v0.3.0
 
 A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
 
@@ -43,7 +43,7 @@ The `Stepper` interface replaces JavaScript's `function*`/`yield` pattern:
 Thread functions are **pure** with respect to global state:
 - Can read globals via a snapshot taken at `multi` block entry
 - Cannot write globals (enforced at runtime)
-- Return results via `->` syntax; results assigned only after all threads complete
+- Return results via `thread key: func()` syntax; results assigned only after all threads complete
 - No locks, no shared mutable state
 
 ## External Functions & Result Pattern
@@ -256,7 +256,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (41 test cases)
+./gradlew test           # JUnit tests (69 test cases)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs
