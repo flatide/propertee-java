@@ -577,7 +577,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
 
             // Write directly to globals (bypasses local scopes)
-            variables.put(varName, value);
+            variables.put(varName, TypeChecker.deepCopy(value));
             return value;
         }
 
@@ -592,9 +592,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
 
             if (!ss.isEmpty()) {
-                ss.set(varName, value);
+                ss.set(varName, TypeChecker.deepCopy(value));
             } else {
-                vars.put(varName, value);
+                vars.put(varName, TypeChecker.deepCopy(value));
             }
             return value;
         }
@@ -618,14 +618,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @SuppressWarnings("unchecked")
     private void setProperty(Object target, Object key, Object value, org.antlr.v4.runtime.ParserRuleContext ctx) {
         if (target instanceof Map) {
-            ((Map<String, Object>) target).put(String.valueOf(key), value);
+            ((Map<String, Object>) target).put(String.valueOf(key), TypeChecker.deepCopy(value));
         } else if (target instanceof List) {
             List<Object> list = (List<Object>) target;
             int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= list.size()) {
                 throw createError("Array index out of bounds", ctx);
             }
-            list.set(index, value);
+            list.set(index, TypeChecker.deepCopy(value));
         }
     }
 
@@ -758,9 +758,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     }
 
                     if (!ss.isEmpty()) {
-                        ss.set(valueVar, list.get(i));
+                        ss.set(valueVar, TypeChecker.deepCopy(list.get(i)));
                     } else {
-                        vars.put(valueVar, list.get(i));
+                        vars.put(valueVar, TypeChecker.deepCopy(list.get(i)));
                     }
 
                     try {
@@ -783,9 +783,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     }
 
                     if (!ss.isEmpty()) {
-                        ss.set(valueVar, entry.getValue());
+                        ss.set(valueVar, TypeChecker.deepCopy(entry.getValue()));
                     } else {
-                        vars.put(valueVar, entry.getValue());
+                        vars.put(valueVar, TypeChecker.deepCopy(entry.getValue()));
                     }
 
                     try {
@@ -831,10 +831,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     Object keyVal = i + 1;
                     if (!ss.isEmpty()) {
                         ss.set(keyVar, keyVal);
-                        ss.set(valueVar, list.get(i));
+                        ss.set(valueVar, TypeChecker.deepCopy(list.get(i)));
                     } else {
                         vars.put(keyVar, keyVal);
-                        vars.put(valueVar, list.get(i));
+                        vars.put(valueVar, TypeChecker.deepCopy(list.get(i)));
                     }
 
                     try {
@@ -858,10 +858,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
                     if (!ss.isEmpty()) {
                         ss.set(keyVar, entry.getKey());
-                        ss.set(valueVar, entry.getValue());
+                        ss.set(valueVar, TypeChecker.deepCopy(entry.getValue()));
                     } else {
                         vars.put(keyVar, entry.getKey());
-                        vars.put(valueVar, entry.getValue());
+                        vars.put(valueVar, TypeChecker.deepCopy(entry.getValue()));
                     }
 
                     try {
@@ -1376,7 +1376,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         // Create local scope
         Map<String, Object> localScope = new LinkedHashMap<String, Object>();
         for (int i = 0; i < params.size(); i++) {
-            localScope.put(params.get(i), i < args.size() ? args.get(i) : new LinkedHashMap<String, Object>());
+            localScope.put(params.get(i), i < args.size() ? TypeChecker.deepCopy(args.get(i)) : new LinkedHashMap<String, Object>());
         }
 
         // Push scope
@@ -1524,8 +1524,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         // Extract result variable name from [resultVar] syntax (nullable)
         String resultVarName = ctx.resultVar != null ? ctx.resultVar.getText() : null;
 
-        // Snapshot globals for threads
-        Map<String, Object> globalSnapshot = new LinkedHashMap<String, Object>(vars);
+        // Deep-copy snapshot of globals for thread purity
+        Map<String, Object> globalSnapshot = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : vars.entrySet()) {
+            globalSnapshot.put(entry.getKey(), TypeChecker.deepCopy(entry.getValue()));
+        }
 
         // Setup phase: execute the block body, collecting SPAWN specs
         // Push a scope so setup variables don't leak (:: required for globals, like functions)
@@ -1598,7 +1601,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
                 Map<String, Object> localScope = new LinkedHashMap<String, Object>();
                 for (int j = 0; j < params.size(); j++) {
-                    localScope.put(params.get(j), j < spawn.args.size() ? spawn.args.get(j) : new LinkedHashMap<String, Object>());
+                    localScope.put(params.get(j), j < spawn.args.size() ? TypeChecker.deepCopy(spawn.args.get(j)) : new LinkedHashMap<String, Object>());
                 }
 
                 Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);

@@ -81,7 +81,9 @@ public class ScriptTest {
             "64_time_functions",
             "65_keys",
             "66_sort",
-            "67_sort_errors"
+            "67_sort_errors",
+            "68_cow_semantics",
+            "69_thread_isolation"
         };
 
         for (String name : testNames) {
