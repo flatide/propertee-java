@@ -11,5 +11,8 @@ build/
 .classpath
 .settings/
 
+# Claude Code
+CLAUDE.md
+
 # OS
 .DS_Store
