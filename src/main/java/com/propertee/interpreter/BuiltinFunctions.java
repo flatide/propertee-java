@@ -1,11 +1,14 @@
 package com.propertee.interpreter;
 
+import com.propertee.runtime.AsyncPendingException;
 import com.propertee.runtime.ProperTeeError;
 import com.propertee.runtime.TypeChecker;
+import com.propertee.scheduler.ThreadContext;
 import com.propertee.stepper.SchedulerCommand;
 
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class BuiltinFunctions {
 
@@ -20,6 +23,9 @@ public class BuiltinFunctions {
     private final Map<String, BuiltinFunction> functions = new LinkedHashMap<String, BuiltinFunction>();
     private PrintFunction stdout;
     private PrintFunction stderr;
+    private ProperTeeInterpreter interpreter;
+    private ExecutorService asyncExecutor;
+    private boolean ownedExecutor = false;
 
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr) {
         this.stdout = stdout;
@@ -527,6 +533,84 @@ public class BuiltinFunctions {
                 } catch (Exception e) {
                     return com.propertee.runtime.Result.error(e.getMessage());
                 }
+            }
+        });
+    }
+
+    // --- Async external function support ---
+
+    public void setInterpreter(ProperTeeInterpreter interpreter) {
+        this.interpreter = interpreter;
+    }
+
+    public void setAsyncExecutor(ExecutorService executor) {
+        this.asyncExecutor = executor;
+    }
+
+    private ExecutorService getOrCreateAsyncExecutor() {
+        if (asyncExecutor == null) {
+            asyncExecutor = Executors.newCachedThreadPool();
+            ownedExecutor = true;
+        }
+        return asyncExecutor;
+    }
+
+    public void shutdown() {
+        if (ownedExecutor && asyncExecutor != null) {
+            asyncExecutor.shutdownNow();
+            asyncExecutor = null;
+            ownedExecutor = false;
+        }
+    }
+
+    public void registerExternalAsync(final String name, final BuiltinFunction func) {
+        registerExternalAsync(name, func, 0);
+    }
+
+    public void registerExternalAsync(final String name, final BuiltinFunction func, final long timeoutMs) {
+        functions.put(name, new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (interpreter == null || interpreter.activeThread == null) {
+                    throw new ProperTeeError("Runtime Error: Async function '" + name + "' can only be called within the scheduler");
+                }
+                ThreadContext thread = interpreter.activeThread;
+                if (thread.inMonitorContext) {
+                    throw new ProperTeeError("Runtime Error: Async function '" + name + "' cannot be called in monitor blocks");
+                }
+
+                // Build cache key
+                String cacheKey = name + "|" + TypeChecker.formatValue(args);
+
+                // Check cache first
+                if (thread.asyncResultCache.containsKey(cacheKey)) {
+                    return thread.asyncResultCache.get(cacheKey);
+                }
+
+                // Deep-copy args for thread safety
+                final List<Object> safeCopyArgs = new ArrayList<Object>();
+                for (Object arg : args) {
+                    safeCopyArgs.add(TypeChecker.deepCopy(arg));
+                }
+
+                // Submit to executor
+                ExecutorService executor = getOrCreateAsyncExecutor();
+                Future<Object> future = executor.submit(new Callable<Object>() {
+                    @Override
+                    public Object call() throws Exception {
+                        try {
+                            return func.call(safeCopyArgs);
+                        } catch (Exception e) {
+                            return com.propertee.runtime.Result.error(e.getMessage());
+                        }
+                    }
+                });
+
+                thread.asyncFuture = future;
+                thread.asyncCacheKey = cacheKey;
+                thread.asyncTimeoutMs = timeoutMs;
+                thread.asyncSubmitTime = System.currentTimeMillis();
+                throw new AsyncPendingException();
             }
         });
     }

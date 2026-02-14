@@ -70,6 +70,48 @@ else
 end
 ```
 
+## Async External Functions
+
+For external functions that perform blocking I/O (database queries, HTTP calls), use `registerExternalAsync()` so other ProperTee threads can continue while the I/O completes:
+
+```java
+// Register an async function — executes on a thread pool
+interpreter.builtins.registerExternalAsync("FETCH_USER", new BuiltinFunction() {
+    public Object call(List<Object> args) {
+        String userId = (String) args.get(0);
+        // This runs on a background thread — blocking is OK here
+        User user = database.findById(userId);
+        if (user != null) return Result.ok(user.toMap());
+        return Result.error("user not found");
+    }
+});
+
+// With timeout (milliseconds)
+interpreter.builtins.registerExternalAsync("SLOW_API", func, 5000);
+```
+
+**Thread pool management:**
+
+```java
+// Option 1: Let ProperTee manage its own pool (default)
+// A cached thread pool is created lazily on first async call
+// Call shutdown() when done:
+interpreter.builtins.shutdown();
+
+// Option 2: Provide your own executor (e.g., Spring's TaskExecutor)
+interpreter.builtins.setAsyncExecutor(myExecutorService);
+// You manage the executor lifecycle — shutdown() is a no-op
+```
+
+**When to use sync vs async:**
+- Fast in-memory lookups, simple computations → `registerExternal()` (sync)
+- Database queries, HTTP calls, file I/O → `registerExternalAsync()` (async)
+
+**Limitations:**
+- Side effects in the same statement as an async call may replay on retry (use separate statements)
+- Multiple async calls in one statement execute sequentially, not in parallel
+- Async calls are not allowed in monitor blocks
+
 ## Integrating with Legacy Java Systems
 
 ProperTee Java is designed for embedding into existing Java applications, including legacy systems running Java 7. The interpreter has zero dependency on Java 8+ APIs, making it safe to deploy on older JVMs, application servers (Tomcat 7, JBoss EAP 6, WebSphere 8.x), and embedded environments.
@@ -256,7 +298,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (69 test cases)
+./gradlew test           # JUnit tests (70 test cases)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs

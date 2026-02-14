@@ -83,6 +83,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         this.maxIterations = maxIterations;
         this.iterationLimitBehavior = iterationLimitBehavior;
         this.builtins = new BuiltinFunctions(stdout, stderr);
+        this.builtins.setInterpreter(this);
     }
 
     // --- Helper methods ---
@@ -227,6 +228,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         }
                         return StepResult.command(cmd);
                     }
+                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
                     index++;
                     if (index < statements.size()) {
                         yieldBoundary = true;
@@ -239,6 +241,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     result = e.getValue();
                     done = true;
                     return StepResult.done(result);
+                } catch (AsyncPendingException e) {
+                    return StepResult.command(SchedulerCommand.awaitAsync());
                 }
             }
 
@@ -294,23 +298,28 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
 
             if (index < statements.size()) {
-                result = interp.eval(statements.get(index));
-                if (result instanceof SchedulerCommand) {
-                    SchedulerCommand cmd = (SchedulerCommand) result;
-                    result = null;
-                    index++;
-                    if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                        waitingForSpawn = true;
+                try {
+                    result = interp.eval(statements.get(index));
+                    if (result instanceof SchedulerCommand) {
+                        SchedulerCommand cmd = (SchedulerCommand) result;
+                        result = null;
+                        index++;
+                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
+                            waitingForSpawn = true;
+                        }
+                        return StepResult.command(cmd);
                     }
-                    return StepResult.command(cmd);
-                }
-                index++;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
-                    done = true;
-                    return StepResult.done(result);
+                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
+                    index++;
+                    if (index < statements.size()) {
+                        yieldBoundary = true;
+                        return StepResult.BOUNDARY;
+                    } else {
+                        done = true;
+                        return StepResult.done(result);
+                    }
+                } catch (AsyncPendingException e) {
+                    return StepResult.command(SchedulerCommand.awaitAsync());
                 }
             }
 
@@ -386,6 +395,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         }
                         return StepResult.command(cmd);
                     }
+                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
                     index++;
                     if (index < statements.size()) {
                         yieldBoundary = true;
@@ -395,6 +405,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     }
                 } catch (ReturnException e) {
                     return finish(e.getValue());
+                } catch (AsyncPendingException e) {
+                    return StepResult.command(SchedulerCommand.awaitAsync());
                 }
             }
 
@@ -476,6 +488,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         }
                         return StepResult.command(cmd);
                     }
+                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
                     index++;
                     if (index < statements.size()) {
                         yieldBoundary = true;
@@ -485,6 +498,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     }
                 } catch (ReturnException e) {
                     return finish(e.getValue());
+                } catch (AsyncPendingException e) {
+                    return StepResult.command(SchedulerCommand.awaitAsync());
                 }
             }
 

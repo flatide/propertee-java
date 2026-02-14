@@ -84,7 +84,8 @@ public class ScriptTest {
             "67_sort_errors",
             "68_cow_semantics",
             "69_thread_isolation",
-            "70_debug_statement"
+            "70_debug_statement",
+            "71_async_external"
         };
 
         for (String name : testNames) {
@@ -182,6 +183,34 @@ public class ScriptTest {
                 });
             }
 
+            // Register async external functions for test 71
+            if ("71_async_external".equals(testName)) {
+                visitor.builtins.registerExternalAsync("SLOW_FETCH", new BuiltinFunctions.BuiltinFunction() {
+                    @Override
+                    public Object call(List<Object> args) {
+                        String key = (String) args.get(0);
+                        try { Thread.sleep(50); } catch (InterruptedException e) { /* ignore */ }
+                        if ("error".equals(key)) return Result.error("fetch error: error");
+                        return Result.ok(key + "_data");
+                    }
+                });
+                visitor.builtins.registerExternalAsync("SLOW_COMPUTE", new BuiltinFunctions.BuiltinFunction() {
+                    @Override
+                    public Object call(List<Object> args) {
+                        int n = ((Number) args.get(0)).intValue();
+                        try { Thread.sleep(30); } catch (InterruptedException e) { /* ignore */ }
+                        return Result.ok(n * 10);
+                    }
+                });
+                visitor.builtins.registerExternalAsync("SLOW_TIMEOUT", new BuiltinFunctions.BuiltinFunction() {
+                    @Override
+                    public Object call(List<Object> args) {
+                        try { Thread.sleep(500); } catch (InterruptedException e) { /* ignore */ }
+                        return Result.ok("should not reach");
+                    }
+                }, 100);
+            }
+
             Scheduler scheduler = new Scheduler(visitor);
             Stepper mainStepper = visitor.createRootStepper(tree);
 
@@ -191,6 +220,8 @@ public class ScriptTest {
             } catch (Exception e) {
                 if (output.length() > 0) output.append("\n");
                 output.append("Runtime error: " + e.getMessage());
+            } finally {
+                visitor.builtins.shutdown();
             }
         }
 

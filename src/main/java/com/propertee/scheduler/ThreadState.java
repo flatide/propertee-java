@@ -5,6 +5,7 @@ public enum ThreadState {
     RUNNING,
     SLEEPING,
     WAITING,
+    BLOCKED,
     COMPLETED,
     ERROR
 }

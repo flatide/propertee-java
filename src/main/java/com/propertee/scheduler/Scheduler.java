@@ -6,6 +6,7 @@ import com.propertee.runtime.Result;
 import com.propertee.stepper.*;
 
 import java.util.*;
+import java.util.concurrent.Future;
 
 public class Scheduler {
     private final ProperTeeInterpreter visitor;
@@ -61,6 +62,36 @@ public class Scheduler {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private void pollAsyncFutures() {
+        long now = System.currentTimeMillis();
+        for (ThreadContext thread : threads.values()) {
+            if (thread.state == ThreadState.BLOCKED && thread.asyncFuture != null) {
+                // Check timeout
+                if (thread.asyncTimeoutMs > 0 && (now - thread.asyncSubmitTime) > thread.asyncTimeoutMs) {
+                    thread.asyncFuture.cancel(true);
+                    thread.asyncResultCache.put(thread.asyncCacheKey, Result.error("timeout"));
+                    thread.asyncFuture = null;
+                    thread.asyncCacheKey = null;
+                    thread.markReady();
+                    continue;
+                }
+                if (thread.asyncFuture.isDone()) {
+                    try {
+                        Object result = thread.asyncFuture.get();
+                        thread.asyncResultCache.put(thread.asyncCacheKey, result);
+                    } catch (Exception e) {
+                        String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                        thread.asyncResultCache.put(thread.asyncCacheKey, Result.error(msg));
+                    }
+                    thread.asyncFuture = null;
+                    thread.asyncCacheKey = null;
+                    thread.markReady();
+                }
+            }
+        }
+    }
+
     private boolean hasActiveThreads() {
         for (ThreadContext thread : threads.values()) {
             if (thread.state != ThreadState.COMPLETED && thread.state != ThreadState.ERROR) {
@@ -97,6 +128,10 @@ public class Scheduler {
                 }
                 case SPAWN_THREADS: {
                     handleSpawnThreads(thread, cmd);
+                    return;
+                }
+                case AWAIT_ASYNC: {
+                    thread.markBlocked();
                     return;
                 }
             }
@@ -264,6 +299,7 @@ public class Scheduler {
             long now = System.currentTimeMillis();
 
             wakeThreads(now);
+            pollAsyncFutures();
             runMonitors();
 
             ThreadContext thread = selectNextThread();
@@ -279,14 +315,14 @@ public class Scheduler {
                     continue;
                 }
 
-                boolean hasWaiting = false;
+                boolean hasWaitingOrBlocked = false;
                 for (ThreadContext t : threads.values()) {
-                    if (t.state == ThreadState.WAITING) {
-                        hasWaiting = true;
+                    if (t.state == ThreadState.WAITING || t.state == ThreadState.BLOCKED) {
+                        hasWaitingOrBlocked = true;
                         break;
                     }
                 }
-                if (hasWaiting) {
+                if (hasWaitingOrBlocked) {
                     try { Thread.sleep(1); } catch (InterruptedException e) { break; }
                     continue;
                 }

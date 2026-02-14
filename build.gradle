@@ -130,3 +130,12 @@ test {
         exceptionFormat "full"
     }
 }
+
+task runAsyncDemo(type: JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.propertee.tests.AsyncDemo'
+    standardInput = System.in
+    description = 'Run async external functions demo'
+    group = 'application'
+}

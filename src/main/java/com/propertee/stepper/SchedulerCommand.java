@@ -5,7 +5,8 @@ import java.util.*;
 public class SchedulerCommand {
     public enum CommandType {
         SLEEP,
-        SPAWN_THREADS
+        SPAWN_THREADS,
+        AWAIT_ASYNC
     }
 
     private final CommandType type;
@@ -26,6 +27,10 @@ public class SchedulerCommand {
         SchedulerCommand cmd = new SchedulerCommand(CommandType.SLEEP);
         cmd.duration = duration;
         return cmd;
+    }
+
+    public static SchedulerCommand awaitAsync() {
+        return new SchedulerCommand(CommandType.AWAIT_ASYNC);
     }
 
     public static SchedulerCommand spawnThreads(List<ThreadSpec> specs, MonitorSpec monitorSpec,

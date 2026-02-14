@@ -51,6 +51,13 @@ public class ThreadContext {
     public String resultKeyName = null; // this child's key in the collection
     public Map<String, Object> localScope = null;
 
+    // Async external function support
+    public Map<String, Object> asyncResultCache = new LinkedHashMap<String, Object>();
+    public java.util.concurrent.Future<Object> asyncFuture = null;
+    public String asyncCacheKey = null;
+    public long asyncTimeoutMs = 0;
+    public long asyncSubmitTime = 0;
+
     public ThreadContext(int id, String name, Stepper stepper, Map<String, Object> globalSnapshot) {
         this.id = id;
         this.name = name;
@@ -79,6 +86,16 @@ public class ThreadContext {
     public void markError(Throwable error) {
         state = ThreadState.ERROR;
         this.error = error;
+    }
+
+    public void markBlocked() { state = ThreadState.BLOCKED; }
+
+    public void clearAsyncState() {
+        asyncResultCache.clear();
+        asyncFuture = null;
+        asyncCacheKey = null;
+        asyncTimeoutMs = 0;
+        asyncSubmitTime = 0;
     }
 
     public boolean shouldWake(long now) {
