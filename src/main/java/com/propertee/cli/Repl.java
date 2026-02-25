@@ -90,6 +90,8 @@ public class Repl {
             }
         } catch (IOException e) {
             // exit
+        } finally {
+            visitor.builtins.shutdown();
         }
 
         System.out.println("\nBye.");

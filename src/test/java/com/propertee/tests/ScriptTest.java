@@ -85,7 +85,8 @@ public class ScriptTest {
             "68_cow_semantics",
             "69_thread_isolation",
             "70_debug_statement",
-            "71_async_external"
+            "71_async_external",
+            "72_shell"
         };
 
         for (String name : testNames) {

@@ -6,6 +6,9 @@ import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.ThreadContext;
 import com.propertee.stepper.SchedulerCommand;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
@@ -465,6 +468,138 @@ public class BuiltinFunctions {
             @Override
             public Object call(List<Object> args) {
                 return new SimpleDateFormat("HH:mm:ss").format(new Date());
+            }
+        });
+
+        // SHELL_CTX — sync, creates a context config object
+        registerExternal("SHELL_CTX", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (args.isEmpty()) {
+                    return com.propertee.runtime.Result.error("SHELL_CTX() requires at least 1 argument (cwd)");
+                }
+                Object cwdArg = args.get(0);
+                if (!(cwdArg instanceof String)) {
+                    return com.propertee.runtime.Result.error("SHELL_CTX() first argument must be a string (directory path)");
+                }
+                String cwd = (String) cwdArg;
+                File dir = new File(cwd);
+                if (!dir.exists() || !dir.isDirectory()) {
+                    return com.propertee.runtime.Result.error("Directory does not exist: " + cwd);
+                }
+
+                Map<String, Object> envMap = new LinkedHashMap<String, Object>();
+                if (args.size() >= 2) {
+                    Object envArg = args.get(1);
+                    if (!(envArg instanceof Map)) {
+                        return com.propertee.runtime.Result.error("SHELL_CTX() second argument must be an object (environment variables)");
+                    }
+                    Map<String, Object> rawEnv = (Map<String, Object>) envArg;
+                    for (Map.Entry<String, Object> entry : rawEnv.entrySet()) {
+                        envMap.put(entry.getKey(), TypeChecker.toStringValue(entry.getValue()));
+                    }
+                }
+
+                Map<String, Object> ctx = new LinkedHashMap<String, Object>();
+                ctx.put("cwd", cwd);
+                ctx.put("env", envMap);
+                return com.propertee.runtime.Result.ok(ctx);
+            }
+        });
+
+        // SHELL — async, executes shell commands via ProcessBuilder
+        registerExternalAsync("SHELL", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (args.isEmpty()) {
+                    return com.propertee.runtime.Result.error("SHELL() requires at least 1 argument");
+                }
+
+                String cmd;
+                File workDir = null;
+                Map<String, String> envVars = null;
+
+                if (args.size() == 1) {
+                    // One-off: SHELL(cmd)
+                    if (!(args.get(0) instanceof String)) {
+                        return com.propertee.runtime.Result.error("SHELL() argument must be a string command");
+                    }
+                    cmd = (String) args.get(0);
+                } else {
+                    // Contextual: SHELL(ctx, cmd)
+                    Object ctxArg = args.get(0);
+                    if (!(ctxArg instanceof Map)) {
+                        return com.propertee.runtime.Result.error("SHELL() first argument must be a context object from SHELL_CTX()");
+                    }
+                    Map<String, Object> ctx = (Map<String, Object>) ctxArg;
+                    // Auto-unwrap Result from SHELL_CTX: {ok, value: {cwd, env}}
+                    if (ctx.containsKey("ok") && ctx.containsKey("value")) {
+                        Object okVal = ctx.get("ok");
+                        if (okVal instanceof Boolean && !((Boolean) okVal)) {
+                            return com.propertee.runtime.Result.error("SHELL() received a failed context: " + ctx.get("value"));
+                        }
+                        Object inner = ctx.get("value");
+                        if (inner instanceof Map) {
+                            ctx = (Map<String, Object>) inner;
+                        }
+                    }
+                    if (!(args.get(1) instanceof String)) {
+                        return com.propertee.runtime.Result.error("SHELL() second argument must be a string command");
+                    }
+                    cmd = (String) args.get(1);
+
+                    Object cwdVal = ctx.get("cwd");
+                    if (cwdVal instanceof String) {
+                        workDir = new File((String) cwdVal);
+                    }
+
+                    Object envVal = ctx.get("env");
+                    if (envVal instanceof Map) {
+                        envVars = new LinkedHashMap<String, String>();
+                        for (Map.Entry<String, Object> entry : ((Map<String, Object>) envVal).entrySet()) {
+                            envVars.put(entry.getKey(), TypeChecker.toStringValue(entry.getValue()));
+                        }
+                    }
+                }
+
+                try {
+                    ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", cmd);
+                    pb.redirectErrorStream(true);
+                    if (workDir != null) {
+                        pb.directory(workDir);
+                    }
+                    if (envVars != null) {
+                        pb.environment().putAll(envVars);
+                    }
+
+                    Process process = pb.start();
+
+                    InputStream is = process.getInputStream();
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = is.read(buf)) != -1) {
+                        baos.write(buf, 0, len);
+                    }
+
+                    int exitCode = process.waitFor();
+                    String output = baos.toString("UTF-8");
+
+                    // Trim trailing newline
+                    if (output.endsWith("\n")) {
+                        output = output.substring(0, output.length() - 1);
+                    }
+
+                    if (exitCode == 0) {
+                        return com.propertee.runtime.Result.ok(output);
+                    } else {
+                        return com.propertee.runtime.Result.error(output);
+                    }
+                } catch (Exception e) {
+                    return com.propertee.runtime.Result.error(e.getMessage());
+                }
             }
         });
     }

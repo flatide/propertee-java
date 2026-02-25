@@ -179,6 +179,8 @@ public class Main {
             } catch (Exception e) {
                 System.err.println("Runtime error: " + e.getMessage());
                 System.exit(1);
+            } finally {
+                visitor.builtins.shutdown();
             }
         } else {
             // REPL mode
