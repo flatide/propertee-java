@@ -71,6 +71,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public int maxIterations = 1000;
     public String iterationLimitBehavior = "error";
 
+    // Restriction lists
+    private Set<String> hiddenKeywords = new HashSet<String>();
+    private Set<String> ignoredFunctions = new HashSet<String>();
+
     // I/O
     public BuiltinFunctions.PrintFunction stdout;
     public BuiltinFunctions.PrintFunction stderr;
@@ -84,6 +88,20 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         this.iterationLimitBehavior = iterationLimitBehavior;
         this.builtins = new BuiltinFunctions(stdout, stderr);
         this.builtins.setInterpreter(this);
+    }
+
+    public void setHiddenKeywords(Set<String> keywords) {
+        this.hiddenKeywords = keywords != null ? keywords : new HashSet<String>();
+    }
+
+    public void setIgnoredFunctions(Set<String> functions) {
+        this.ignoredFunctions = functions != null ? functions : new HashSet<String>();
+    }
+
+    private void checkKeywordAllowed(String keyword, org.antlr.v4.runtime.ParserRuleContext ctx) {
+        if (hiddenKeywords.contains(keyword)) {
+            throw createError("'" + keyword + "' is not available in this environment", ctx);
+        }
     }
 
     // --- Helper methods ---
@@ -685,6 +703,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitIfStatement(ProperTeeParser.IfStatementContext ctx) {
+        checkKeywordAllowed("if", ctx);
         Object condition = eval(ctx.condition);
 
         if (TypeChecker.isTruthy(condition)) {
@@ -711,6 +730,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitConditionLoop(ProperTeeParser.ConditionLoopContext ctx) {
+        checkKeywordAllowed("loop", ctx);
         Object result = null;
         boolean isInfinite = ctx.K_INFINITE() != null;
         int limit = isInfinite ? Integer.MAX_VALUE : maxIterations;
@@ -750,6 +770,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     @SuppressWarnings("unchecked")
     public Object visitValueLoop(ProperTeeParser.ValueLoopContext ctx) {
+        checkKeywordAllowed("loop", ctx);
         Object iterable = eval(ctx.expression());
         boolean isInfinite = ctx.K_INFINITE() != null;
         int limit = isInfinite ? Integer.MAX_VALUE : maxIterations;
@@ -819,6 +840,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     @SuppressWarnings("unchecked")
     public Object visitKeyValueLoop(ProperTeeParser.KeyValueLoopContext ctx) {
+        checkKeywordAllowed("loop", ctx);
         Object iterable = eval(ctx.expression());
         boolean isInfinite = ctx.K_INFINITE() != null;
         int limit = isInfinite ? Integer.MAX_VALUE : maxIterations;
@@ -912,6 +934,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitDebugStmt(ProperTeeParser.DebugStmtContext ctx) {
+        checkKeywordAllowed("debug", ctx);
         // No-op in normal execution; playground debug mode handles this in the scheduler
         return new LinkedHashMap<String, Object>();
     }
@@ -920,6 +943,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitFunctionDef(ProperTeeParser.FunctionDefContext ctx) {
+        checkKeywordAllowed("function", ctx);
         String funcName = ctx.funcName.getText();
         List<String> params = new ArrayList<String>();
         if (ctx.parameterList() != null) {
@@ -1353,6 +1377,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Object visitFunctionCall(ProperTeeParser.FunctionCallContext ctx) {
         String funcName = ctx.funcName.getText();
 
+        // Check function ignore list
+        if (ignoredFunctions.contains(funcName)) {
+            throw createError("'" + funcName + "' is not available in this environment", ctx);
+        }
+
         // Evaluate arguments
         List<Object> args = new ArrayList<Object>();
         if (ctx.expression() != null) {
@@ -1456,6 +1485,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitSpawnKeyStmt(ProperTeeParser.SpawnKeyStmtContext ctx) {
+        checkKeywordAllowed("thread", ctx);
         if (!inMultiSetup) {
             throw createError("thread can only be used inside multi blocks", ctx);
         }
@@ -1539,6 +1569,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     @SuppressWarnings("unchecked")
     public Object visitParallelStmt(ProperTeeParser.ParallelStmtContext ctx) {
+        checkKeywordAllowed("multi", ctx);
         Map<String, Object> vars = getVariables();
 
         // Extract result variable name from [resultVar] syntax (nullable)
@@ -1628,6 +1659,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
 
             } else if (builtins.has(spawn.funcName)) {
+                // Check function ignore list
+                if (ignoredFunctions.contains(spawn.funcName)) {
+                    throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
+                }
                 // Built-in function: execute immediately and wrap result
                 Object builtinResult = builtins.get(spawn.funcName).call(spawn.args);
                 Stepper immediateStepper = new ImmediateStepper(builtinResult);

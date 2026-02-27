@@ -86,7 +86,9 @@ public class ScriptTest {
             "69_thread_isolation",
             "70_debug_statement",
             "71_async_external",
-            "72_shell"
+            "72_shell",
+            "73_keyword_ignore",
+            "74_function_ignore"
         };
 
         for (String name : testNames) {
@@ -210,6 +212,20 @@ public class ScriptTest {
                         return Result.ok("should not reach");
                     }
                 }, 100);
+            }
+
+            // Configure hidden keywords for test 73
+            if ("73_keyword_ignore".equals(testName)) {
+                Set<String> hidden = new HashSet<String>();
+                hidden.add("if");
+                visitor.setHiddenKeywords(hidden);
+            }
+
+            // Configure ignored functions for test 74
+            if ("74_function_ignore".equals(testName)) {
+                Set<String> ignored = new HashSet<String>();
+                ignored.add("SHELL");
+                visitor.setIgnoredFunctions(ignored);
             }
 
             Scheduler scheduler = new Scheduler(visitor);
