@@ -265,6 +265,26 @@ scheduler.run(interp.createRootStepper(cachedTree));
 - **Thread purity:** Thread functions cannot mutate global state. They read a snapshot taken at `multi` block entry, preventing race conditions.
 - **No reflection or class loading:** Scripts cannot access Java internals.
 
+#### Restricting Language Features
+
+Hide keywords and block functions to create sandboxed environments:
+
+```java
+// Hide language keywords — scripts using them get a runtime error
+Set<String> hidden = new HashSet<String>();
+hidden.add("multi");    // disable parallel execution
+hidden.add("loop");     // disable all loop forms
+interpreter.setHiddenKeywords(hidden);
+
+// Block specific functions
+Set<String> ignored = new HashSet<String>();
+ignored.add("SHELL");   // disable shell access
+ignored.add("SLEEP");   // disable sleep
+interpreter.setIgnoredFunctions(ignored);
+```
+
+Keywords that can be hidden: `if`, `loop`, `function`, `multi`, `thread`, `debug`. Both built-in and external functions can be blocked. Using a hidden keyword or blocked function produces a runtime error: `'X' is not available in this environment`.
+
 ### Accessing Script Results
 
 After execution, read values from the interpreter:
@@ -298,7 +318,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (70 test cases)
+./gradlew test           # JUnit tests (73 test cases)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs
