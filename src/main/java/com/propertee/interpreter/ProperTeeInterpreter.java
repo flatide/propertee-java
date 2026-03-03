@@ -654,6 +654,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             ((Map<String, Object>) target).put(String.valueOf(key), TypeChecker.deepCopy(value));
         } else if (target instanceof List) {
             List<Object> list = (List<Object>) target;
+            if (!(key instanceof Number)) {
+                throw createError("Array index must be a number, got string. Use arr.1 not arr.\"1\"", ctx);
+            }
             int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= list.size()) {
                 throw createError("Array index out of bounds", ctx);
@@ -1171,6 +1174,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
         if (target instanceof List) {
             List<Object> list = (List<Object>) target;
+            if (!(key instanceof Number)) {
+                String msg = "Array index must be a number, got string. Use arr.1 not arr.\"1\"";
+                if (ctx != null) throw createError(msg, ctx);
+                throw new ProperTeeError("Runtime Error: " + msg);
+            }
             int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= list.size()) {
                 if (ctx != null) throw createError("Array index out of bounds", ctx);
@@ -1181,6 +1189,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         if (target instanceof String) {
             // String character access
             String s = (String) target;
+            if (!(key instanceof Number)) {
+                String msg = "String index must be a number, got string. Use str.1 not str.\"1\"";
+                if (ctx != null) throw createError(msg, ctx);
+                throw new ProperTeeError("Runtime Error: " + msg);
+            }
             int index = ((Number) key).intValue() - 1; // 1-based to 0-based
             if (index < 0 || index >= s.length()) {
                 if (ctx != null) throw createError("String index out of bounds", ctx);
