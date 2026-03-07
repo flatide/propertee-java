@@ -88,7 +88,10 @@ public class ScriptTest {
             "71_async_external",
             "72_shell",
             "73_keyword_ignore",
-            "74_function_ignore"
+            "74_function_ignore",
+            "75_range_step_eval_once",
+            "76_range_tiny_float_bound",
+            "77_range_int_overflow"
         };
 
         for (String name : testNames) {

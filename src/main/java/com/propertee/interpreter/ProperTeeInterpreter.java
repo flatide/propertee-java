@@ -6,6 +6,7 @@ import com.propertee.runtime.*;
 import com.propertee.stepper.*;
 import com.propertee.scheduler.ThreadContext;
 
+import java.math.BigDecimal;
 import java.util.*;
 
 /**
@@ -1093,57 +1094,74 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             throw createError("Range bounds must be numbers", ctx);
         }
 
-        double start = ((Number) startVal).doubleValue();
-        double end = ((Number) endVal).doubleValue();
-
-        double step;
+        Object stepVal = null;
         if (ctx.rangeStep != null) {
-            Object stepVal = eval(ctx.rangeStep);
+            stepVal = eval(ctx.rangeStep);
             if (!(stepVal instanceof Number)) {
                 throw createError("Range step must be a number", ctx);
             }
-            step = ((Number) stepVal).doubleValue();
-            if (step <= 0) {
+            if (((Number) stepVal).doubleValue() <= 0) {
                 throw createError("Range step must be positive", ctx);
             }
-        } else {
-            step = 1.0;
-        }
-
-        // Negate step when descending
-        if (start > end) {
-            step = -step;
         }
 
         boolean useIntegers = (startVal instanceof Integer) && (endVal instanceof Integer)
-                && (ctx.rangeStep == null || eval(ctx.rangeStep) instanceof Integer);
+                && (stepVal == null || stepVal instanceof Integer);
 
         List<Object> arr = new ArrayList<Object>();
         if (useIntegers) {
-            int s = (Integer) startVal;
-            int e = (Integer) endVal;
-            int st = (int) step;
-            if (st > 0) {
-                for (int i = s; i <= e; i += st) arr.add(i);
+            long start = ((Integer) startVal).longValue();
+            long end = ((Integer) endVal).longValue();
+            long step = stepVal == null ? 1L : ((Integer) stepVal).longValue();
+
+            if (start > end) {
+                step = -step;
+            }
+
+            if (step > 0) {
+                for (long i = start; i <= end; i += step) arr.add((int) i);
             } else {
-                for (int i = s; i >= e; i += st) arr.add(i);
+                for (long i = start; i >= end; i += step) arr.add((int) i);
             }
         } else {
-            if (step > 0) {
-                for (double v = start; v <= end + 1e-9; v += step) {
-                    v = Math.round(v * 1e12) / 1e12;
-                    if (v > end + 1e-9) break;
-                    arr.add(TypeChecker.boxNumber(v));
+            BigDecimal start = toBigDecimal((Number) startVal);
+            BigDecimal end = toBigDecimal((Number) endVal);
+            BigDecimal step = stepVal == null ? BigDecimal.ONE : toBigDecimal((Number) stepVal);
+
+            if (start.compareTo(end) > 0) {
+                step = step.negate();
+            }
+
+            if (step.signum() > 0) {
+                for (BigDecimal value = start; value.compareTo(end) <= 0; value = value.add(step)) {
+                    arr.add(boxRangeNumber(value));
                 }
             } else {
-                for (double v = start; v >= end - 1e-9; v += step) {
-                    v = Math.round(v * 1e12) / 1e12;
-                    if (v < end - 1e-9) break;
-                    arr.add(TypeChecker.boxNumber(v));
+                for (BigDecimal value = start; value.compareTo(end) >= 0; value = value.add(step)) {
+                    arr.add(boxRangeNumber(value));
                 }
             }
         }
         return arr;
+    }
+
+    private static BigDecimal toBigDecimal(Number value) {
+        if (value instanceof Integer || value instanceof Long) {
+            return BigDecimal.valueOf(value.longValue());
+        }
+        return BigDecimal.valueOf(value.doubleValue());
+    }
+
+    private static Object boxRangeNumber(BigDecimal value) {
+        BigDecimal normalized = value.stripTrailingZeros();
+        if (normalized.scale() <= 0) {
+            try {
+                return normalized.intValueExact();
+            } catch (ArithmeticException e) {
+                return normalized.doubleValue();
+            }
+        }
+        return normalized.doubleValue();
     }
 
     // --- Member access ---
