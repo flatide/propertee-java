@@ -17,11 +17,6 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class BuiltinFunctions {
-    private static final Object TASK_ENGINE_LOCK = new Object();
-    // Shared per task base dir for the lifetime of the JVM process. Do not evict on
-    // BuiltinFunctions.shutdown(), which runs per interpreter instance and would
-    // break host-instance identity for still-running tasks.
-    private static final Map<String, TaskEngine> SHARED_TASK_ENGINES = new LinkedHashMap<String, TaskEngine>();
 
 
     public interface BuiltinFunction {
@@ -49,7 +44,7 @@ public class BuiltinFunctions {
         this.stdout = stdout;
         this.stderr = stderr;
         this.runId = runId != null ? runId : createRunId();
-        this.taskEngine = taskEngine != null ? taskEngine : getOrCreateTaskEngine(resolveTaskBaseDir());
+        this.taskEngine = taskEngine != null ? taskEngine : createDefaultTaskEngine();
         registerDefaults();
     }
 
@@ -721,7 +716,6 @@ public class BuiltinFunctions {
     }
 
     public void shutdown() {
-        taskEngine.shutdown();
         if (ownedExecutor && asyncExecutor != null) {
             asyncExecutor.shutdownNow();
             asyncExecutor = null;
@@ -729,34 +723,19 @@ public class BuiltinFunctions {
         }
     }
 
-    private static String resolveTaskBaseDir() {
-        String configured = System.getProperty("propertee.task.baseDir");
-        if (configured != null && configured.trim().length() > 0) {
-            return configured.trim();
+    private static TaskEngine createDefaultTaskEngine() {
+        String baseDir = System.getProperty("propertee.task.baseDir");
+        if (baseDir == null || baseDir.trim().length() == 0) {
+            baseDir = new File(System.getProperty("java.io.tmpdir"), "propertee-java-task-engine").getAbsolutePath();
         }
-        return new File(System.getProperty("java.io.tmpdir"), "propertee-java-task-engine").getAbsolutePath();
-    }
-
-    private static String createHostInstanceId() {
-        return "host-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(new Date()) +
+        String hostId = "cli-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(new Date()) +
             "-" + Integer.toHexString((int) (System.nanoTime() & 0xffff));
+        return new TaskEngine(baseDir, hostId);
     }
 
     private static String createRunId() {
         return "run-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(new Date()) +
             "-" + Integer.toHexString((int) (System.nanoTime() & 0xffff));
-    }
-
-    private static TaskEngine getOrCreateTaskEngine(String baseDir) {
-        synchronized (TASK_ENGINE_LOCK) {
-            TaskEngine engine = SHARED_TASK_ENGINES.get(baseDir);
-            if (engine == null) {
-                engine = new TaskEngine(baseDir, createHostInstanceId());
-                engine.init();
-                SHARED_TASK_ENGINES.put(baseDir, engine);
-            }
-            return engine;
-        }
     }
 
     @SuppressWarnings("unchecked")

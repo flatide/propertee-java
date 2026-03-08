@@ -145,6 +145,9 @@ task runMockServer(type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.propertee.mockserver.MockServerMain'
     standardInput = System.in
+    systemProperties System.properties.findAll { key, value ->
+        key.startsWith('propertee.mock.') || key.startsWith('propertee.task.')
+    }
     description = 'Run ProperTee mock admin server'
     group = 'application'
 }

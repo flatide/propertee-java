@@ -78,8 +78,6 @@ public class TaskEngine {
         task.cwd = request.cwd;
         task.hostInstanceId = hostInstanceId;
         task.bindFiles(taskDir);
-
-        saveMeta(task);
         writeCommandFiles(task, request);
 
         int launcherPid = launchDetached(task, request);
@@ -265,14 +263,6 @@ public class TaskEngine {
         }
     }
 
-    public void shutdown() {
-        // Intentionally does not terminate running tasks.
-    }
-
-    public void registerBuiltins(ProperTeeInterpreter interpreter) {
-        // Builtins are registered from BuiltinFunctions to keep task parsing close to SHELL.
-    }
-
     public Map<String, Object> getStatusMap(String taskId) {
         Task task = getTask(taskId);
         if (task == null) return null;
@@ -442,7 +432,11 @@ public class TaskEngine {
         }
 
         finalizeExitedTask(task);
-        saveMeta(task);
+        // Only persist clean exits (completed/failed/killed).
+        // "lost" is deferred to init() on server restart.
+        if (!"lost".equals(task.status)) {
+            saveMeta(task);
+        }
     }
 
     private void finalizeExitedTask(Task task) {

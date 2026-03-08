@@ -347,38 +347,59 @@ public class MockAdminServer {
         List<RunInfo> runs = runManager.listRuns();
         List<TaskInfo> detached = runManager.listDetachedTasks();
         StringBuilder sb = new StringBuilder();
-        sb.append(pageStart("ProperTee Mock Admin", true));
-        sb.append("<h1>ProperTee Mock Admin</h1>");
-        sb.append("<p>scriptsRoot: <code>").append(escape(config.scriptsRoot.getAbsolutePath())).append("</code></p>");
-        sb.append("<p>dataDir: <code>").append(escape(config.dataDir.getAbsolutePath())).append("</code></p>");
-        sb.append("<p>active runs: ").append(runManager.getActiveCount()).append(" | queued: ").append(runManager.getQueuedCount()).append("</p>");
+        sb.append(pageStart("ProperTee Mock Admin"));
+        sb.append("<div class='header'><h1>ProperTee Admin</h1>");
+        sb.append("<div class='header-meta'>");
+        sb.append("<span class='tag'>active ").append(runManager.getActiveCount()).append("</span> ");
+        sb.append("<span class='tag'>queued ").append(runManager.getQueuedCount()).append("</span>");
+        sb.append("</div></div>");
+
+        sb.append("<div class='card'>");
         sb.append("<h2>Run Script</h2>");
-        sb.append("<form method='post' action='/admin/submit'>");
-        sb.append("<label>scriptPath <input type='text' name='scriptPath' style='width: 420px' placeholder='jobs/sample.pt'/></label><br/>");
-        sb.append("<label>props JSON <input type='text' name='propsJson' style='width: 420px' value='{}'/></label><br/>");
-        sb.append("<label>maxIterations <input type='text' name='maxIterations' value='1000'/></label>");
-        sb.append("<label style='margin-left: 16px'><input type='checkbox' name='warnLoops'/> warnLoops</label>");
-        sb.append("<div style='margin-top: 8px'><button type='submit'>Submit</button></div>");
-        sb.append("</form>");
-        sb.append("<p><a href='/api/runs'>JSON: /api/runs</a> | <a href='/api/tasks'>JSON: /api/tasks</a></p>");
-        sb.append("<h2>Runs</h2>");
-        sb.append("<table><thead><tr><th>runId</th><th>script</th><th>status</th><th>created</th><th>started</th><th>ended</th><th>threads</th><th>tasks</th></tr></thead><tbody>");
-        for (RunInfo run : runs) {
-            sb.append("<tr>");
-            sb.append("<td><a href='/admin/runs/").append(urlPath(run.runId)).append("'>").append(escape(run.runId)).append("</a></td>");
-            sb.append("<td>").append(escape(run.scriptPath)).append("</td>");
-            sb.append("<td>").append(statusBadge(run.status != null ? run.status.name() : "UNKNOWN")).append("</td>");
-            sb.append("<td>").append(escape(formatTime(run.createdAt))).append("</td>");
-            sb.append("<td>").append(escape(formatTime(run.startedAt))).append("</td>");
-            sb.append("<td>").append(escape(formatTime(run.endedAt))).append("</td>");
-            sb.append("<td>").append(run.threads != null ? run.threads.size() : 0).append("</td>");
-            sb.append("<td>").append(runManager.listTasksForRun(run.runId).size()).append("</td>");
-            sb.append("</tr>");
+        sb.append("<form method='post' action='/admin/submit' class='form-grid'>");
+        sb.append("<div class='form-row'><label>Script Path</label><input type='text' name='scriptPath' placeholder='01_basic_run.pt'/></div>");
+        sb.append("<div class='form-row'><label>Props (JSON)</label><input type='text' name='propsJson' value='{}'/></div>");
+        sb.append("<div class='form-row-inline'>");
+        sb.append("<div><label>Max Iterations</label><input type='text' name='maxIterations' value='1000' style='width:100px'/></div>");
+        sb.append("<label class='checkbox-label'><input type='checkbox' name='warnLoops'/> Warn Loops</label>");
+        sb.append("<button type='submit'>Run</button>");
+        sb.append("</div></form></div>");
+
+        sb.append("<div class='card'>");
+        sb.append("<div class='card-header'><h2>Runs</h2>");
+        sb.append("<div class='card-actions'><a href='/api/runs' class='link-subtle'>API</a> <a href='/api/tasks' class='link-subtle'>Tasks API</a></div></div>");
+        if (runs.isEmpty()) {
+            sb.append("<p class='empty'>No runs yet</p>");
+        } else {
+            sb.append("<div class='table-wrap'><table><thead><tr><th>Run ID</th><th>Script</th><th>Status</th><th>Created</th><th>Duration</th><th>Threads</th><th>Tasks</th></tr></thead><tbody>");
+            for (RunInfo run : runs) {
+                sb.append("<tr>");
+                sb.append("<td><a href='/admin/runs/").append(urlPath(run.runId)).append("' class='mono'>").append(escape(run.runId)).append("</a></td>");
+                sb.append("<td class='mono'>").append(escape(run.scriptPath)).append("</td>");
+                sb.append("<td>").append(statusBadge(run.status != null ? run.status.name() : "UNKNOWN")).append("</td>");
+                sb.append("<td class='dim'>").append(escape(formatTime(run.createdAt))).append("</td>");
+                sb.append("<td class='dim'>").append(formatDuration(run.startedAt, run.endedAt)).append("</td>");
+                sb.append("<td class='center'>").append(run.threads != null ? run.threads.size() : 0).append("</td>");
+                sb.append("<td class='center'>").append(runManager.listTasksForRun(run.runId).size()).append("</td>");
+                sb.append("</tr>");
+            }
+            sb.append("</tbody></table></div>");
         }
-        sb.append("</tbody></table>");
-        sb.append("<h2>Detached Tasks</h2>");
-        sb.append(renderTaskTable(detached, false));
-        sb.append(pageEnd());
+        sb.append("</div>");
+
+        if (!detached.isEmpty()) {
+            sb.append("<div class='card'>");
+            sb.append("<h2>Detached Tasks</h2>");
+            sb.append(renderTaskTable(detached, false));
+            sb.append("</div>");
+        }
+
+        sb.append("<div class='footer'>");
+        sb.append("<span class='dim'>scriptsRoot: ").append(escape(config.scriptsRoot.getAbsolutePath())).append("</span><br/>");
+        sb.append("<span class='dim'>dataDir: ").append(escape(config.dataDir.getAbsolutePath())).append("</span>");
+        sb.append("</div>");
+
+        sb.append(pageEnd(true));
         return sb.toString();
     }
 
@@ -390,26 +411,54 @@ public class MockAdminServer {
         List<RunThreadInfo> threads = runManager.listThreads(runId);
         List<TaskInfo> tasks = runManager.listTasksForRun(runId);
         StringBuilder sb = new StringBuilder();
-        sb.append(pageStart("Run " + runId, true));
-        sb.append("<p><a href='/admin'>Back</a> | <a href='/api/runs/").append(urlPath(runId)).append("'>JSON</a></p>");
-        sb.append("<h1>Run ").append(escape(runId)).append("</h1>");
-        sb.append("<p>script: <code>").append(escape(run.scriptPath)).append("</code></p>");
-        sb.append("<p>status: ").append(statusBadge(run.status != null ? run.status.name() : "UNKNOWN")).append("</p>");
-        sb.append("<p>created: ").append(escape(formatTime(run.createdAt))).append(" | started: ").append(escape(formatTime(run.startedAt))).append(" | ended: ").append(escape(formatTime(run.endedAt))).append("</p>");
-        sb.append("<form method='post' action='/admin/runs/").append(urlPath(runId)).append("/kill-tasks'><button type='submit'>Kill All Run Tasks</button></form>");
+        sb.append(pageStart("Run " + runId));
+
+        sb.append("<div class='nav'>");
+        sb.append("<a href='/admin'>Dashboard</a>");
+        sb.append("<span class='nav-sep'>/</span>");
+        sb.append("<span>Run ").append(escape(shortId(runId))).append("</span>");
+        sb.append("<span class='nav-sep'>|</span>");
+        sb.append("<a href='/api/runs/").append(urlPath(runId)).append("' class='link-subtle'>JSON</a>");
+        sb.append("</div>");
+
+        sb.append("<div class='card'>");
+        sb.append("<div class='card-header'><h2>").append(escape(runId)).append("</h2>");
+        sb.append("<form method='post' action='/admin/runs/").append(urlPath(runId)).append("/kill-tasks'>");
+        sb.append("<button type='submit' class='btn-danger btn-sm'>Kill All Tasks</button></form></div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Script</div><div class='detail-value'><code>").append(escape(run.scriptPath)).append("</code></div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Status</div><div class='detail-value'>").append(statusBadge(run.status != null ? run.status.name() : "UNKNOWN")).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Created</div><div class='detail-value dim'>").append(escape(formatTime(run.createdAt))).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Started</div><div class='detail-value dim'>").append(escape(formatTime(run.startedAt))).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Ended</div><div class='detail-value dim'>").append(escape(formatTime(run.endedAt))).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Duration</div><div class='detail-value'>").append(formatDuration(run.startedAt, run.endedAt)).append("</div></div>");
+        sb.append("</div></div>");
+
         if (run.errorMessage != null && run.errorMessage.length() > 0) {
-            sb.append("<h2>Error</h2><pre>").append(escape(run.errorMessage)).append("</pre>");
+            sb.append("<div class='card'><h2>Error</h2><pre>").append(escape(run.errorMessage)).append("</pre></div>");
         }
         if (run.resultSummary != null && run.resultSummary.length() > 0) {
-            sb.append("<h2>Result</h2><pre>").append(escape(run.resultSummary)).append("</pre>");
+            sb.append("<div class='card'><h2>Result</h2><pre>").append(escape(run.resultSummary)).append("</pre></div>");
         }
-        sb.append("<h2>Threads</h2>");
+
+        sb.append("<div class='card'><h2>Threads (").append(threads.size()).append(")</h2>");
         sb.append(renderThreadTable(threads));
-        sb.append("<h2>Tasks / Processes</h2>");
+        sb.append("</div>");
+
+        sb.append("<div class='card'><h2>Tasks (").append(tasks.size()).append(")</h2>");
         sb.append(renderTaskTable(tasks, true));
-        sb.append("<h2>Stdout</h2><pre>").append(escape(joinLines(run.stdoutLines))).append("</pre>");
-        sb.append("<h2>Stderr</h2><pre>").append(escape(joinLines(run.stderrLines))).append("</pre>");
-        sb.append(pageEnd());
+        sb.append("</div>");
+
+        String stdout = joinLines(run.stdoutLines);
+        String stderr = joinLines(run.stderrLines);
+        if (stdout.length() > 0) {
+            sb.append("<div class='card'><h2>Stdout</h2><pre>").append(escape(stdout)).append("</pre></div>");
+        }
+        if (stderr.length() > 0) {
+            sb.append("<div class='card'><h2>Stderr</h2><pre>").append(escape(stderr)).append("</pre></div>");
+        }
+
+        sb.append(pageEnd(true));
         return sb.toString();
     }
 
@@ -420,109 +469,251 @@ public class MockAdminServer {
         }
         TaskObservation obs = runManager.observeTask(taskId);
         StringBuilder sb = new StringBuilder();
-        sb.append(pageStart("Task " + taskId, true));
-        sb.append("<p><a href='/admin'>Back</a>");
+        sb.append(pageStart("Task " + taskId));
+
+        sb.append("<div class='nav'>");
+        sb.append("<a href='/admin'>Dashboard</a>");
         if (info.runId != null) {
-            sb.append(" | <a href='/admin/runs/").append(urlPath(info.runId)).append("'>Run</a>");
+            sb.append("<span class='nav-sep'>/</span>");
+            sb.append("<a href='/admin/runs/").append(urlPath(info.runId)).append("'>Run ").append(escape(shortId(info.runId))).append("</a>");
         }
-        sb.append(" | <a href='/api/tasks/").append(urlPath(taskId)).append("'>JSON</a></p>");
-        sb.append("<h1>Task ").append(escape(taskId)).append("</h1>");
-        sb.append("<p>status: ").append(statusBadge(info.status)).append("</p>");
-        sb.append("<p>runId: ").append(escape(info.runId)).append(" | threadId: ").append(escape(info.threadId)).append(" | threadName: ").append(escape(info.threadName)).append("</p>");
-        sb.append("<p>pid: ").append(info.pid).append(" | pgid: ").append(info.pgid).append(" | alive: ").append(info.alive).append("</p>");
-        sb.append("<p>cwd: <code>").append(escape(info.cwd)).append("</code></p>");
-        sb.append("<p>command:</p><pre>").append(escape(info.command)).append("</pre>");
-        sb.append("<form method='post' action='/admin/tasks/").append(urlPath(taskId)).append("/kill'><button type='submit'>Kill Task</button></form>");
+        sb.append("<span class='nav-sep'>/</span>");
+        sb.append("<span>Task ").append(escape(shortId(taskId))).append("</span>");
+        sb.append("<span class='nav-sep'>|</span>");
+        sb.append("<a href='/api/tasks/").append(urlPath(taskId)).append("' class='link-subtle'>JSON</a>");
+        sb.append("</div>");
+
+        sb.append("<div class='card'>");
+        sb.append("<div class='card-header'><h2>").append(escape(taskId)).append("</h2>");
+        sb.append("<form method='post' action='/admin/tasks/").append(urlPath(taskId)).append("/kill'>");
+        sb.append("<button type='submit' class='btn-danger btn-sm'>Kill Task</button></form></div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Status</div><div class='detail-value'>").append(statusBadge(info.status)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Run ID</div><div class='detail-value mono'>").append(escape(info.runId)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Thread</div><div class='detail-value'>").append(escape(info.threadName)).append(" <span class='dim'>#").append(escape(info.threadId)).append("</span></div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>PID</div><div class='detail-value mono'>").append(info.pid).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>PGID</div><div class='detail-value mono'>").append(info.pgid).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Alive</div><div class='detail-value'>").append(info.alive ? statusBadge("RUNNING") : statusBadge("DONE")).append("</div></div>");
+        sb.append("</div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>CWD</div><div class='detail-value'><code>").append(escape(info.cwd)).append("</code></div></div>");
+        sb.append("</div>");
+        sb.append("<div class='detail-item' style='margin-top:12px'><div class='detail-label'>Command</div></div>");
+        sb.append("<pre>").append(escape(info.command)).append("</pre>");
+        sb.append("</div>");
+
         if (obs != null) {
-            sb.append("<h2>Observation</h2><pre>").append(escape(gson.toJson(obs))).append("</pre>");
+            sb.append("<div class='card'><h2>Observation</h2><pre>").append(escape(gson.toJson(obs))).append("</pre></div>");
         }
-        sb.append("<h2>Stdout Tail</h2><pre>").append(escape(tail(runManager.getTaskStdout(taskId), 4000))).append("</pre>");
-        sb.append("<h2>Stderr Tail</h2><pre>").append(escape(tail(runManager.getTaskStderr(taskId), 4000))).append("</pre>");
-        sb.append(pageEnd());
+
+        String stdoutTail = tail(runManager.getTaskStdout(taskId), 4000);
+        String stderrTail = tail(runManager.getTaskStderr(taskId), 4000);
+        if (stdoutTail.length() > 0) {
+            sb.append("<div class='card'><h2>Stdout</h2><pre>").append(escape(stdoutTail)).append("</pre></div>");
+        }
+        if (stderrTail.length() > 0) {
+            sb.append("<div class='card'><h2>Stderr</h2><pre>").append(escape(stderrTail)).append("</pre></div>");
+        }
+
+        sb.append(pageEnd(true));
         return sb.toString();
     }
 
     private String renderThreadTable(List<RunThreadInfo> threads) {
+        if (threads.isEmpty()) {
+            return "<p class='empty'>No threads</p>";
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append("<table><thead><tr><th>id</th><th>name</th><th>state</th><th>parent</th><th>sleepUntil</th><th>async</th><th>resultKey</th><th>result</th><th>error</th><th>updated</th></tr></thead><tbody>");
+        sb.append("<div class='table-wrap'><table><thead><tr>");
+        sb.append("<th>ID</th><th>Name</th><th>State</th><th>Parent</th><th>Key</th><th>Result</th><th>Error</th><th>Updated</th>");
+        sb.append("</tr></thead><tbody>");
         for (RunThreadInfo thread : threads) {
             sb.append("<tr>");
-            sb.append("<td>").append(thread.threadId).append("</td>");
-            sb.append("<td>").append(escape(thread.name)).append("</td>");
+            sb.append("<td class='center'>").append(thread.threadId).append("</td>");
+            sb.append("<td class='mono'>").append(escape(thread.name)).append("</td>");
             sb.append("<td>").append(statusBadge(thread.state)).append("</td>");
-            sb.append("<td>").append(escape(thread.parentId)).append("</td>");
-            sb.append("<td>").append(escape(formatTime(thread.sleepUntil))).append("</td>");
-            sb.append("<td>").append(thread.asyncPending).append("</td>");
-            sb.append("<td>").append(escape(thread.resultKeyName)).append("</td>");
+            sb.append("<td class='center dim'>").append(escape(thread.parentId)).append("</td>");
+            sb.append("<td class='mono'>").append(escape(thread.resultKeyName)).append("</td>");
             sb.append("<td>").append(escape(thread.resultSummary)).append("</td>");
             sb.append("<td>").append(escape(thread.errorMessage)).append("</td>");
-            sb.append("<td>").append(escape(formatTime(thread.updatedAt))).append("</td>");
+            sb.append("<td class='dim'>").append(escape(formatTime(thread.updatedAt))).append("</td>");
             sb.append("</tr>");
         }
-        sb.append("</tbody></table>");
+        sb.append("</tbody></table></div>");
         return sb.toString();
     }
 
     private String renderTaskTable(List<TaskInfo> tasks, boolean includeKill) {
+        if (tasks.isEmpty()) {
+            return "<p class='empty'>No tasks</p>";
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append("<table><thead><tr><th>taskId</th><th>runId</th><th>thread</th><th>status</th><th>pid</th><th>pgid</th><th>alive</th><th>elapsedMs</th><th>lastOutputAgeMs</th><th>action</th></tr></thead><tbody>");
+        sb.append("<div class='table-wrap'><table><thead><tr>");
+        sb.append("<th>Task ID</th><th>Thread</th><th>Status</th><th>PID</th><th>Alive</th><th>Elapsed</th>");
+        if (includeKill) {
+            sb.append("<th></th>");
+        }
+        sb.append("</tr></thead><tbody>");
         for (TaskInfo task : tasks) {
             sb.append("<tr>");
-            sb.append("<td><a href='/admin/tasks/").append(urlPath(task.taskId)).append("'>").append(escape(task.taskId)).append("</a></td>");
-            sb.append("<td>").append(escape(task.runId)).append("</td>");
-            sb.append("<td>").append(escape(task.threadName)).append(" (#").append(escape(task.threadId)).append(")</td>");
+            sb.append("<td><a href='/admin/tasks/").append(urlPath(task.taskId)).append("' class='mono'>").append(escape(shortId(task.taskId))).append("</a></td>");
+            sb.append("<td>").append(escape(task.threadName)).append(" <span class='dim'>#").append(escape(task.threadId)).append("</span></td>");
             sb.append("<td>").append(statusBadge(task.status)).append("</td>");
-            sb.append("<td>").append(task.pid).append("</td>");
-            sb.append("<td>").append(task.pgid).append("</td>");
-            sb.append("<td>").append(task.alive).append("</td>");
-            sb.append("<td>").append(task.elapsedMs).append("</td>");
-            sb.append("<td>").append(escape(task.lastOutputAgeMs)).append("</td>");
-            sb.append("<td>");
+            sb.append("<td class='mono center'>").append(task.pid).append("</td>");
+            sb.append("<td class='center'>").append(task.alive ? statusBadge("RUNNING") : "<span class='dim'>no</span>").append("</td>");
+            sb.append("<td class='dim'>").append(formatElapsed(task.elapsedMs)).append("</td>");
             if (includeKill) {
-                sb.append("<form method='post' action='/admin/tasks/").append(urlPath(task.taskId)).append("/kill'><button type='submit'>Kill</button></form>");
+                sb.append("<td>");
+                if (task.alive) {
+                    sb.append("<form method='post' action='/admin/tasks/").append(urlPath(task.taskId)).append("/kill'><button type='submit' class='btn-danger btn-sm'>Kill</button></form>");
+                }
+                sb.append("</td>");
             }
-            sb.append("</td>");
             sb.append("</tr>");
         }
-        sb.append("</tbody></table>");
+        sb.append("</tbody></table></div>");
         return sb.toString();
     }
 
     private String renderErrorPage(String title, String message) {
         StringBuilder sb = new StringBuilder();
-        sb.append(pageStart(title, false));
-        sb.append("<p><a href='/admin'>Back</a></p>");
-        sb.append("<h1>").append(escape(title)).append("</h1>");
+        sb.append(pageStart(title));
+        sb.append("<div class='nav'><a href='/admin'>Dashboard</a><span class='nav-sep'>/</span><span>Error</span></div>");
+        sb.append("<div class='card'>");
+        sb.append("<h2>").append(escape(title)).append("</h2>");
         sb.append("<pre>").append(escape(message)).append("</pre>");
+        sb.append("</div>");
         sb.append(pageEnd());
         return sb.toString();
     }
 
-    private String pageStart(String title, boolean autoRefresh) {
+    private String pageStart(String title) {
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html><head><meta charset='utf-8'/>");
-        if (autoRefresh) {
-            sb.append("<meta http-equiv='refresh' content='2' />");
-        }
+        sb.append("<meta name='viewport' content='width=device-width, initial-scale=1'/>");
         sb.append("<title>").append(escape(title)).append("</title>");
         sb.append("<style>");
-        sb.append("body{font-family:Georgia,serif;margin:24px;background:#f7f3ec;color:#1f1f1f;} ");
-        sb.append("table{border-collapse:collapse;width:100%;margin:12px 0;} ");
-        sb.append("th,td{border:1px solid #c9bba7;padding:8px;vertical-align:top;font-size:14px;} ");
-        sb.append("th{background:#e7dcc9;text-align:left;} ");
-        sb.append("code,pre{background:#fffaf1;border:1px solid #d6c7b5;padding:8px;display:block;white-space:pre-wrap;} ");
-        sb.append("input{padding:6px;} button{padding:6px 10px;background:#325c45;color:white;border:none;} ");
-        sb.append(".badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#d8ccb9;} ");
+        sb.append("*{box-sizing:border-box;margin:0;padding:0;} ");
+        sb.append("body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;");
+        sb.append("background:#f0f2f5;color:#1a1a2e;line-height:1.5;padding:24px;max-width:1200px;margin:0 auto;} ");
+        sb.append("a{color:#2563eb;text-decoration:none;} a:hover{text-decoration:underline;} ");
+        sb.append("h1{font-size:22px;font-weight:600;} h2{font-size:16px;font-weight:600;margin:0 0 12px 0;} ");
+
+        // header
+        sb.append(".header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;} ");
+        sb.append(".header-meta{display:flex;gap:8px;} ");
+
+        // card
+        sb.append(".card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:16px;} ");
+        sb.append(".card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;} ");
+        sb.append(".card-header h2{margin:0;} ");
+        sb.append(".card-actions{display:flex;gap:12px;} ");
+
+        // form
+        sb.append(".form-grid{display:flex;flex-direction:column;gap:12px;} ");
+        sb.append(".form-row{display:flex;flex-direction:column;gap:4px;} ");
+        sb.append(".form-row label{font-size:13px;font-weight:500;color:#64748b;} ");
+        sb.append(".form-row input{padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;} ");
+        sb.append(".form-row input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.15);} ");
+        sb.append(".form-row-inline{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;} ");
+        sb.append(".form-row-inline > div{display:flex;flex-direction:column;gap:4px;} ");
+        sb.append(".form-row-inline label{font-size:13px;font-weight:500;color:#64748b;} ");
+        sb.append(".form-row-inline input[type='text']{padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;} ");
+        sb.append(".checkbox-label{display:flex;align-items:center;gap:6px;font-size:14px;cursor:pointer;padding-bottom:4px;} ");
+
+        // table
+        sb.append(".table-wrap{overflow-x:auto;margin:0 -4px;} ");
+        sb.append("table{border-collapse:collapse;width:100%;font-size:13px;} ");
+        sb.append("th{background:#f8fafc;color:#64748b;font-weight:500;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;");
+        sb.append("padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;} ");
+        sb.append("td{padding:8px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top;} ");
+        sb.append("tr:hover{background:#f8fafc;} ");
+
+        // badge
+        sb.append(".badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:0.3px;} ");
+        sb.append(".badge-running{background:#dbeafe;color:#1d4ed8;} ");
+        sb.append(".badge-completed,.badge-done{background:#dcfce7;color:#15803d;} ");
+        sb.append(".badge-error,.badge-failed{background:#fee2e2;color:#b91c1c;} ");
+        sb.append(".badge-killed{background:#fef3c7;color:#92400e;} ");
+        sb.append(".badge-queued,.badge-pending,.badge-waiting,.badge-blocked{background:#f3e8ff;color:#7c3aed;} ");
+        sb.append(".badge-ready{background:#e0f2fe;color:#0369a1;} ");
+        sb.append(".badge-sleeping{background:#fef9c3;color:#854d0e;} ");
+        sb.append(".badge-lost{background:#fecaca;color:#991b1b;} ");
+
+        // buttons
+        sb.append("button,.btn{padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;");
+        sb.append("font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s;} ");
+        sb.append("button:hover,.btn:hover{background:#1d4ed8;} ");
+        sb.append(".btn-danger{background:#dc2626;} .btn-danger:hover{background:#b91c1c;} ");
+        sb.append(".btn-sm{padding:4px 10px;font-size:12px;} ");
+
+        // utilities
+        sb.append(".mono{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;} ");
+        sb.append(".dim{color:#94a3b8;} ");
+        sb.append(".center{text-align:center;} ");
+        sb.append(".link-subtle{color:#64748b;font-size:12px;} .link-subtle:hover{color:#2563eb;} ");
+        sb.append(".empty{color:#94a3b8;padding:24px 0;text-align:center;font-style:italic;} ");
+        sb.append(".footer{margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:12px;} ");
+        sb.append(".tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:500;background:#e2e8f0;color:#475569;} ");
+
+        // detail
+        sb.append(".detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px;} ");
+        sb.append(".detail-item{} .detail-item .detail-label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;} ");
+        sb.append(".detail-item .detail-value{font-size:14px;margin-top:2px;} ");
+
+        // nav
+        sb.append(".nav{display:flex;gap:12px;align-items:center;margin-bottom:16px;font-size:13px;} ");
+        sb.append(".nav-sep{color:#cbd5e1;} ");
+
+        // pre/code
+        sb.append("pre{background:#1e293b;color:#e2e8f0;padding:16px;border-radius:6px;overflow-x:auto;font-size:12px;");
+        sb.append("font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;line-height:1.6;margin-bottom:16px;} ");
+        sb.append("code{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;");
+        sb.append("background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px;} ");
+
         sb.append("</style></head><body>");
         return sb.toString();
     }
 
     private String pageEnd() {
-        return "</body></html>";
+        return pageEnd(false);
+    }
+
+    private String pageEnd(boolean autoRefresh) {
+        if (!autoRefresh) {
+            return "</body></html>";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("<script>");
+        sb.append("(function(){");
+        sb.append("var formFocused=false;");
+        sb.append("var els=document.querySelectorAll('input,button,select,textarea');");
+        sb.append("for(var i=0;i<els.length;i++){");
+        sb.append("els[i].addEventListener('focus',function(){formFocused=true;});");
+        sb.append("els[i].addEventListener('blur',function(){formFocused=false;});");
+        sb.append("}");
+        sb.append("setInterval(function(){if(!formFocused){location.reload();}},2000);");
+        sb.append("})();");
+        sb.append("</script>");
+        sb.append("</body></html>");
+        return sb.toString();
     }
 
     private String statusBadge(String status) {
-        return "<span class='badge'>" + escape(status) + "</span>";
+        String css = "badge";
+        if (status != null) {
+            String lower = status.toLowerCase(Locale.ENGLISH);
+            if ("running".equals(lower)) css = "badge badge-running";
+            else if ("completed".equals(lower) || "done".equals(lower)) css = "badge badge-completed";
+            else if ("error".equals(lower) || "failed".equals(lower)) css = "badge badge-error";
+            else if ("killed".equals(lower)) css = "badge badge-killed";
+            else if ("queued".equals(lower) || "pending".equals(lower)) css = "badge badge-queued";
+            else if ("waiting".equals(lower) || "blocked".equals(lower)) css = "badge badge-blocked";
+            else if ("ready".equals(lower)) css = "badge badge-ready";
+            else if ("sleeping".equals(lower)) css = "badge badge-sleeping";
+            else if ("lost".equals(lower)) css = "badge badge-lost";
+        }
+        return "<span class='" + css + "'>" + escape(status) + "</span>";
     }
 
     private void writeJson(HttpExchange exchange, int status, Object payload) throws IOException {
@@ -623,6 +814,38 @@ public class MockAdminServer {
 
     private String formatTime(long epochMs) {
         return formatTime(Long.valueOf(epochMs));
+    }
+
+    private String formatDuration(Long startMs, Long endMs) {
+        if (startMs == null) return "";
+        long end = endMs != null ? endMs.longValue() : System.currentTimeMillis();
+        long ms = end - startMs.longValue();
+        if (ms < 0) return "";
+        if (ms < 1000) return ms + "ms";
+        long secs = ms / 1000;
+        if (secs < 60) return secs + "s";
+        long mins = secs / 60;
+        secs = secs % 60;
+        if (mins < 60) return mins + "m " + secs + "s";
+        long hours = mins / 60;
+        mins = mins % 60;
+        return hours + "h " + mins + "m";
+    }
+
+    private String formatElapsed(long ms) {
+        if (ms <= 0) return "";
+        if (ms < 1000) return ms + "ms";
+        long secs = ms / 1000;
+        if (secs < 60) return secs + "." + ((ms % 1000) / 100) + "s";
+        long mins = secs / 60;
+        secs = secs % 60;
+        return mins + "m " + secs + "s";
+    }
+
+    private String shortId(String id) {
+        if (id == null) return "";
+        if (id.length() <= 12) return id;
+        return id.substring(0, 8) + "...";
     }
 
     private int parseInt(String raw, int defaultValue) {

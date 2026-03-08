@@ -8,8 +8,8 @@ import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.Scheduler;
 import com.propertee.scheduler.SchedulerListener;
 import com.propertee.scheduler.ThreadContext;
+import com.propertee.task.Task;
 import com.propertee.task.TaskEngine;
-import com.propertee.task.TaskEngineAdmin;
 import com.propertee.task.TaskInfo;
 import com.propertee.task.TaskObservation;
 import com.propertee.stepper.Stepper;
@@ -41,7 +41,6 @@ public class RunManager {
     private final File dataDir;
     private final RunStore runStore;
     private final TaskEngine taskEngine;
-    private final TaskEngineAdmin taskAdmin;
     private final ThreadPoolExecutor runExecutor;
     private final Map<String, RunInfo> runs = new ConcurrentHashMap<String, RunInfo>();
     private final Map<String, Future<?>> activeRuns = new ConcurrentHashMap<String, Future<?>>();
@@ -56,9 +55,8 @@ public class RunManager {
             this.dataDir.mkdirs();
         }
         this.runStore = new RunStore(this.dataDir);
-        this.taskEngine = new TaskEngine(new File(this.dataDir, "tasks").getAbsolutePath(), createHostInstanceId());
+        this.taskEngine = new TaskEngine(this.dataDir.getAbsolutePath(), createHostInstanceId());
         this.taskEngine.init();
-        this.taskAdmin = new TaskEngineAdmin(taskEngine);
         this.runExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Math.max(1, maxConcurrentRuns));
         loadPersistedRuns();
     }
@@ -118,48 +116,41 @@ public class RunManager {
     }
 
     public List<TaskInfo> listTasksForRun(String runId) {
-        return taskAdmin.listByRun(runId);
+        return toInfoList(taskEngine.listByRun(runId));
     }
 
     public List<TaskInfo> listAllTasks() {
-        return taskAdmin.listAll();
+        return toInfoList(taskEngine.listTasks());
     }
 
     public List<TaskInfo> listDetachedTasks() {
-        return taskAdmin.listDetached();
+        return toInfoList(taskEngine.listDetached());
     }
 
     public TaskInfo getTask(String taskId) {
-        return taskAdmin.getTask(taskId);
+        Task task = taskEngine.getTask(taskId);
+        if (task == null) return null;
+        return toInfo(task);
     }
 
     public TaskObservation observeTask(String taskId) {
-        return taskAdmin.observe(taskId);
+        return taskEngine.observe(taskId);
     }
 
     public String getTaskStdout(String taskId) {
-        return taskAdmin.getStdout(taskId);
+        return taskEngine.getStdout(taskId);
     }
 
     public String getTaskStderr(String taskId) {
-        return taskAdmin.getStderr(taskId);
+        return taskEngine.getStderr(taskId);
     }
 
     public boolean killTask(String taskId) {
-        TaskInfo info = taskAdmin.getTask(taskId);
-        boolean killed = taskAdmin.killTask(taskId);
-        if (killed && info != null && info.runId != null) {
-            markCancelRequested(info.runId);
-        }
-        return killed;
+        return taskEngine.killTask(taskId);
     }
 
     public int killRunTasks(String runId) {
-        int killed = taskAdmin.killRun(runId);
-        if (killed > 0) {
-            markCancelRequested(runId);
-        }
-        return killed;
+        return taskEngine.killRun(runId);
     }
 
     public int getQueuedCount() {
@@ -259,19 +250,6 @@ public class RunManager {
             run.endedAt = Long.valueOf(System.currentTimeMillis());
             run.errorMessage = message != null ? message : "Unknown error";
             saveRunLocked(run);
-        }
-    }
-
-    private void markCancelRequested(String runId) {
-        RunInfo run = runs.get(runId);
-        if (run == null) {
-            return;
-        }
-        synchronized (run) {
-            if (!isTerminal(run.status)) {
-                run.status = RunStatus.CANCEL_REQUESTED;
-                saveRunLocked(run);
-            }
         }
     }
 
@@ -482,5 +460,36 @@ public class RunManager {
         public void onThreadError(ThreadContext thread) {
             upsertThread(run, createThreadSnapshot(thread));
         }
+    }
+
+    private List<TaskInfo> toInfoList(List<Task> tasks) {
+        List<TaskInfo> result = new ArrayList<TaskInfo>();
+        for (Task task : tasks) {
+            result.add(toInfo(task));
+        }
+        return result;
+    }
+
+    private TaskInfo toInfo(Task task) {
+        TaskObservation obs = taskEngine.observe(task.taskId);
+        TaskInfo info = new TaskInfo();
+        info.taskId = task.taskId;
+        info.runId = task.runId;
+        info.threadId = task.threadId;
+        info.threadName = task.threadName;
+        info.command = task.command;
+        info.pid = task.pid;
+        info.pgid = task.pgid;
+        info.status = obs != null ? obs.status : task.status;
+        info.alive = obs != null ? obs.alive : task.alive;
+        info.elapsedMs = obs != null ? obs.elapsedMs : 0;
+        info.lastStdoutAt = task.lastStdoutAt;
+        info.lastStderrAt = task.lastStderrAt;
+        info.lastOutputAgeMs = obs != null ? obs.lastOutputAgeMs : null;
+        info.exitCode = task.exitCode;
+        info.cwd = task.cwd;
+        info.hostInstanceId = task.hostInstanceId;
+        info.healthHints = obs != null ? obs.healthHints : new ArrayList<String>();
+        return info;
     }
 }

@@ -7,9 +7,10 @@ This folder contains sample scripts for the mock admin server added in `com.prop
 Run the mock server with this folder as `scriptsRoot`:
 
 ```bash
-./gradlew --no-daemon runMockServer \
+./gradlew --no-daemon \
   -Dpropertee.mock.scriptsRoot=$PWD/demo/mockserver \
-  -Dpropertee.mock.dataDir=/tmp/propertee-mock-data
+  -Dpropertee.mock.dataDir=/tmp/propertee-mock-data \
+  runMockServer
 ```
 
 Open:
