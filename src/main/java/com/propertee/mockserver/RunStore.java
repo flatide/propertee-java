@@ -22,7 +22,6 @@ import java.util.List;
 public class RunStore {
     private final File runsDir;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-    private final Object indexLock = new Object();
     private final File indexFile;
     private final File indexTmpFile;
 
@@ -78,7 +77,7 @@ public class RunStore {
     }
 
     public synchronized List<RunInfo> query(String status, int offset, int limit) {
-        List<RunIndexEntry> entries = loadIndexEntriesLocked();
+        List<RunIndexEntry> entries = loadIndexEntries();
         List<RunInfo> runs = new ArrayList<RunInfo>();
         int safeOffset = offset < 0 ? 0 : offset;
         int matched = 0;
@@ -126,67 +125,61 @@ public class RunStore {
         if (run == null || run.runId == null) {
             return;
         }
-        synchronized (indexLock) {
-            List<RunIndexEntry> entries = loadIndexEntriesLocked();
-            RunIndexEntry updated = RunIndexEntry.fromRun(run);
-            boolean replaced = false;
-            for (int i = 0; i < entries.size(); i++) {
-                if (entries.get(i).runId.equals(run.runId)) {
-                    entries.set(i, updated);
-                    replaced = true;
-                    break;
-                }
+        List<RunIndexEntry> entries = loadIndexEntries();
+        RunIndexEntry updated = RunIndexEntry.fromRun(run);
+        boolean replaced = false;
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).runId.equals(run.runId)) {
+                entries.set(i, updated);
+                replaced = true;
+                break;
             }
-            if (!replaced) {
-                entries.add(updated);
-            }
-            sortIndexEntries(entries);
-            writeIndexLocked(entries);
         }
+        if (!replaced) {
+            entries.add(updated);
+        }
+        sortIndexEntries(entries);
+        writeIndex(entries);
     }
 
     private void removeIndex(String runId) {
-        synchronized (indexLock) {
-            List<RunIndexEntry> entries = loadIndexEntriesLocked();
-            for (int i = entries.size() - 1; i >= 0; i--) {
-                if (entries.get(i).runId.equals(runId)) {
-                    entries.remove(i);
-                }
+        List<RunIndexEntry> entries = loadIndexEntries();
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            if (entries.get(i).runId.equals(runId)) {
+                entries.remove(i);
             }
-            writeIndexLocked(entries);
         }
+        writeIndex(entries);
     }
 
-    private List<RunIndexEntry> loadIndexEntriesLocked() {
-        synchronized (indexLock) {
-            if (!indexFile.exists()) {
-                return rebuildIndexLocked();
+    private List<RunIndexEntry> loadIndexEntries() {
+        if (!indexFile.exists()) {
+            return rebuildIndex();
+        }
+        FileInputStream fis = null;
+        try {
+            fis = new FileInputStream(indexFile);
+            String json = readAll(fis);
+            RunIndexEntry[] parsed = gson.fromJson(json, RunIndexEntry[].class);
+            if (parsed == null) {
+                return rebuildIndex();
             }
-            FileInputStream fis = null;
-            try {
-                fis = new FileInputStream(indexFile);
-                String json = readAll(fis);
-                RunIndexEntry[] parsed = gson.fromJson(json, RunIndexEntry[].class);
-                if (parsed == null) {
-                    return rebuildIndexLocked();
-                }
-                List<RunIndexEntry> entries = new ArrayList<RunIndexEntry>(Arrays.asList(parsed));
-                sortIndexEntries(entries);
-                return entries;
-            } catch (Exception e) {
-                return rebuildIndexLocked();
-            } finally {
-                if (fis != null) {
-                    try {
-                        fis.close();
-                    } catch (IOException ignore) {
-                    }
+            List<RunIndexEntry> entries = new ArrayList<RunIndexEntry>(Arrays.asList(parsed));
+            sortIndexEntries(entries);
+            return entries;
+        } catch (Exception e) {
+            return rebuildIndex();
+        } finally {
+            if (fis != null) {
+                try {
+                    fis.close();
+                } catch (IOException ignore) {
                 }
             }
         }
     }
 
-    private List<RunIndexEntry> rebuildIndexLocked() {
+    private List<RunIndexEntry> rebuildIndex() {
         File[] files = runsDir.listFiles();
         List<RunIndexEntry> entries = new ArrayList<RunIndexEntry>();
         if (files != null) {
@@ -201,7 +194,7 @@ public class RunStore {
             }
         }
         sortIndexEntries(entries);
-        writeIndexLocked(entries);
+        writeIndex(entries);
         return entries;
     }
 
@@ -217,7 +210,7 @@ public class RunStore {
         });
     }
 
-    private void writeIndexLocked(List<RunIndexEntry> entries) {
+    private void writeIndex(List<RunIndexEntry> entries) {
         Writer writer = null;
         try {
             writer = new OutputStreamWriter(new FileOutputStream(indexTmpFile), "UTF-8");
