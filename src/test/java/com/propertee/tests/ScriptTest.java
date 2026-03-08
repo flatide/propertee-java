@@ -21,6 +21,7 @@ import java.util.*;
 
 @RunWith(Parameterized.class)
 public class ScriptTest {
+    private static final String TASK_TEST_BASE_DIR = initTaskBaseDir();
 
     private final String testName;
     private final String scriptContent;
@@ -91,7 +92,10 @@ public class ScriptTest {
             "74_function_ignore",
             "75_range_step_eval_once",
             "76_range_tiny_float_bound",
-            "77_range_int_overflow"
+            "77_range_int_overflow",
+            "78_task_basic",
+            "79_task_cancel",
+            "80_task_unique_ids"
         };
 
         for (String name : testNames) {
@@ -114,6 +118,16 @@ public class ScriptTest {
         }
 
         return tests;
+    }
+
+    private static String initTaskBaseDir() {
+        try {
+            File dir = Files.createTempDirectory("propertee-task-tests").toFile();
+            System.setProperty("propertee.task.baseDir", dir.getAbsolutePath());
+            return dir.getAbsolutePath();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create task test base dir", e);
+        }
     }
 
     private static String readStream(InputStream is) throws IOException {

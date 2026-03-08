@@ -1,0 +1,18 @@
+// Test 80: START_TASK should not reuse async cache entries for identical commands
+
+ids = [START_TASK("sleep 1; echo same"), START_TASK("sleep 1; echo same")]
+
+if ids.1 != ids.2 then
+    PRINT("PASS unique ids")
+else
+    PRINT("FAIL unique ids")
+end
+
+r1 = WAIT_TASK(ids.1, 5000)
+r2 = WAIT_TASK(ids.2, 5000)
+
+if r1.ok == true and r2.ok == true then
+    PRINT("PASS both done")
+else
+    PRINT("FAIL both done")
+end
