@@ -79,6 +79,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     // I/O
     public BuiltinFunctions.PrintFunction stdout;
     public BuiltinFunctions.PrintFunction stderr;
+    private String currentBuiltinCallSiteKey = null;
 
     public ProperTeeInterpreter(Map<String, Object> properties, BuiltinFunctions.PrintFunction stdout,
                                  BuiltinFunctions.PrintFunction stderr, int maxIterations, String iterationLimitBehavior) {
@@ -149,6 +150,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Map<String, Object> getMultiResultVars() {
         if (activeThread != null) return activeThread.multiResultVars;
         return multiResultVars;
+    }
+
+    public String getCurrentBuiltinCallSiteKey() {
+        return currentBuiltinCallSiteKey;
     }
 
     public boolean isInFunctionScope() {
@@ -1423,13 +1428,19 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         // Built-in function
         if (builtins.has(funcName)) {
-            Object result = builtins.get(funcName).call(args);
+            String previousCallSiteKey = currentBuiltinCallSiteKey;
+            currentBuiltinCallSiteKey = buildBuiltinCallSiteKey(ctx);
+            try {
+                Object result = builtins.get(funcName).call(args);
 
-            // SLEEP returns a SchedulerCommand - propagate it up
-            if (result instanceof SchedulerCommand) {
+                // SLEEP returns a SchedulerCommand - propagate it up
+                if (result instanceof SchedulerCommand) {
+                    return result;
+                }
                 return result;
+            } finally {
+                currentBuiltinCallSiteKey = previousCallSiteKey;
             }
-            return result;
         }
 
         // User-defined function
@@ -1438,6 +1449,15 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
 
         throw createError("Unknown function '" + funcName + "'", ctx);
+    }
+
+    private String buildBuiltinCallSiteKey(ProperTeeParser.FunctionCallContext ctx) {
+        if (ctx == null || ctx.getStart() == null) {
+            return "unknown";
+        }
+        return ctx.getStart().getLine() + ":" +
+            ctx.getStart().getCharPositionInLine() + ":" +
+            ctx.getStart().getStartIndex();
     }
 
     @SuppressWarnings("unchecked")

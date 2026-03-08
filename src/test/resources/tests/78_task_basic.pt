@@ -1,0 +1,31 @@
+// Test 78: START_TASK / WAIT_TASK / TASK_STATUS / TASK_RESULT
+
+taskId = START_TASK("sleep 1; echo started_task")
+status1 = TASK_STATUS(taskId)
+
+if status1.alive == true and status1.status == "running" then
+    PRINT("PASS running")
+else
+    PRINT("FAIL running:", status1.status, status1.alive)
+end
+
+waitResult = WAIT_TASK(taskId, 5000)
+if waitResult.ok == true then
+    PRINT("PASS wait:", waitResult.value)
+else
+    PRINT("FAIL wait:", waitResult.value)
+end
+
+status2 = TASK_STATUS(taskId)
+if status2.status == "completed" and status2.alive == false then
+    PRINT("PASS completed")
+else
+    PRINT("FAIL completed:", status2.status, status2.alive)
+end
+
+result2 = TASK_RESULT(taskId)
+if result2.ok == true then
+    PRINT("PASS result:", result2.value)
+else
+    PRINT("FAIL result:", result2.value)
+end

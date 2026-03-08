@@ -70,7 +70,9 @@ public class Scheduler {
                 // Check timeout
                 if (thread.asyncTimeoutMs > 0 && (now - thread.asyncSubmitTime) > thread.asyncTimeoutMs) {
                     thread.asyncFuture.cancel(true);
-                    thread.asyncResultCache.put(thread.asyncCacheKey, Result.error("timeout"));
+                    if (thread.asyncCacheKey != null) {
+                        thread.asyncResultCache.put(thread.asyncCacheKey, Result.error("timeout"));
+                    }
                     thread.asyncFuture = null;
                     thread.asyncCacheKey = null;
                     thread.markReady();
@@ -79,10 +81,14 @@ public class Scheduler {
                 if (thread.asyncFuture.isDone()) {
                     try {
                         Object result = thread.asyncFuture.get();
-                        thread.asyncResultCache.put(thread.asyncCacheKey, result);
+                        if (thread.asyncCacheKey != null) {
+                            thread.asyncResultCache.put(thread.asyncCacheKey, result);
+                        }
                     } catch (Exception e) {
                         String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-                        thread.asyncResultCache.put(thread.asyncCacheKey, Result.error(msg));
+                        if (thread.asyncCacheKey != null) {
+                            thread.asyncResultCache.put(thread.asyncCacheKey, Result.error(msg));
+                        }
                     }
                     thread.asyncFuture = null;
                     thread.asyncCacheKey = null;
