@@ -32,7 +32,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class TaskEngine {
-    private static final long WAIT_POLL_MS = 100L;
+    private static final long WAIT_POLL_INITIAL_MS = 50L;
+    private static final long WAIT_POLL_MAX_MS = 1000L;
     private static final long DEFAULT_RETENTION_MS = 24L * 60L * 60L * 1000L;
     private static final long DEFAULT_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
 
@@ -66,7 +67,7 @@ public class TaskEngine {
         initCounter();
     }
 
-    public synchronized Task execute(TaskRequest request) {
+    public Task execute(TaskRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("Task request is required");
         }
@@ -86,7 +87,7 @@ public class TaskEngine {
         task.threadId = request.threadId;
         task.threadName = request.threadName;
         task.command = request.command;
-        task.status = "starting";
+        task.status = TaskStatus.STARTING;
         task.alive = false;
         task.startTime = System.currentTimeMillis();
         task.timeoutMs = request.timeoutMs;
@@ -99,7 +100,7 @@ public class TaskEngine {
         task.pid = resolveTrackedPid(task, launcherPid);
         task.pidStartTime = getProcessStartTime(task.pid);
         task.pgid = getProcessGroupId(task.pid);
-        task.status = "running";
+        task.status = TaskStatus.RUNNING;
         ownedTaskIds.add(task.taskId);
         task.alive = isOurProcess(task);
         refreshOutputTimestamps(task);
@@ -181,7 +182,7 @@ public class TaskEngine {
             return false;
         }
 
-        task.status = "killed";
+        task.status = TaskStatus.KILLED;
         task.exitCode = Integer.valueOf(-9);
         task.endTime = Long.valueOf(System.currentTimeMillis());
         saveMeta(task);
@@ -234,6 +235,7 @@ public class TaskEngine {
 
     public Task waitForCompletion(String taskId, long timeoutMs) throws InterruptedException {
         long start = System.currentTimeMillis();
+        long pollMs = WAIT_POLL_INITIAL_MS;
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedException("Interrupted while waiting for task");
@@ -253,13 +255,22 @@ public class TaskEngine {
                 return task;
             }
 
-            Thread.sleep(WAIT_POLL_MS);
+            long sleepMs = pollMs;
+            if (timeoutMs > 0) {
+                long remainingMs = timeoutMs - (System.currentTimeMillis() - start);
+                if (remainingMs <= 0) {
+                    return task;
+                }
+                sleepMs = Math.min(sleepMs, remainingMs);
+            }
+            Thread.sleep(sleepMs);
+            pollMs = Math.min(WAIT_POLL_MAX_MS, pollMs * 2L);
         }
     }
 
     public void init() {
         for (Task task : loadAllTasks()) {
-            if (!"starting".equals(task.status) && !"running".equals(task.status) && !"detached".equals(task.status)) {
+            if (!isTransientStatus(task.status)) {
                 refreshTask(task);
                 continue;
             }
@@ -267,9 +278,9 @@ public class TaskEngine {
             refreshOutputTimestamps(task);
             if (isOurProcess(task)) {
                 if (task.hostInstanceId != null && !task.hostInstanceId.equals(hostInstanceId)) {
-                    task.status = "detached";
+                    task.status = TaskStatus.DETACHED;
                 } else {
-                    task.status = "running";
+                    task.status = TaskStatus.RUNNING;
                 }
                 task.alive = true;
             } else {
@@ -636,7 +647,7 @@ public class TaskEngine {
 
     private void refreshTask(Task task) {
         // Already finalized — no disk I/O needed
-        if (!task.alive && !"starting".equals(task.status) && !"running".equals(task.status)) {
+        if (!task.alive && task.status != TaskStatus.STARTING && task.status != TaskStatus.RUNNING) {
             return;
         }
 
@@ -644,8 +655,8 @@ public class TaskEngine {
 
         if (isOurProcess(task)) {
             task.alive = true;
-            if ("starting".equals(task.status)) {
-                task.status = "running";
+            if (task.status == TaskStatus.STARTING) {
+                task.status = TaskStatus.RUNNING;
                 saveMeta(task);
             }
             return;
@@ -654,7 +665,7 @@ public class TaskEngine {
         finalizeExitedTask(task);
         // Only persist clean exits (completed/failed/killed).
         // "lost" is deferred to init() on server restart.
-        if (!"lost".equals(task.status)) {
+        if (task.status != TaskStatus.LOST) {
             saveMeta(task);
         }
     }
@@ -663,7 +674,7 @@ public class TaskEngine {
         task.alive = false;
         refreshOutputTimestamps(task);
 
-        if ("killed".equals(task.status)) {
+        if (task.status == TaskStatus.KILLED) {
             if (task.endTime == null) {
                 task.endTime = Long.valueOf(System.currentTimeMillis());
             }
@@ -676,14 +687,14 @@ public class TaskEngine {
             if (task.endTime == null) {
                 task.endTime = Long.valueOf(System.currentTimeMillis());
             }
-            task.status = exitCode.intValue() == 0 ? "completed" : "failed";
+            task.status = exitCode.intValue() == 0 ? TaskStatus.COMPLETED : TaskStatus.FAILED;
             return;
         }
 
         if (task.endTime == null) {
             task.endTime = Long.valueOf(System.currentTimeMillis());
         }
-        task.status = "lost";
+        task.status = TaskStatus.LOST;
     }
 
     private void refreshOutputTimestamps(Task task) {
@@ -694,7 +705,7 @@ public class TaskEngine {
     private TaskObservation toObservation(Task task) {
         TaskObservation observation = new TaskObservation();
         observation.taskId = task.taskId;
-        observation.status = task.status;
+        observation.status = task.status != null ? task.status.value() : null;
         observation.alive = task.alive;
         observation.elapsedMs = (task.endTime != null ? task.endTime.longValue() : System.currentTimeMillis()) - task.startTime;
         observation.lastStdoutAt = task.lastStdoutAt;
@@ -705,7 +716,7 @@ public class TaskEngine {
         if (observation.timeoutExceeded) {
             observation.healthHints.add("TIMEOUT_EXCEEDED");
         }
-        if ("lost".equals(task.status)) {
+        if (task.status == TaskStatus.LOST) {
             observation.healthHints.add("PROCESS_NOT_FOUND");
         }
         if (task.alive && task.pidStartTime <= 0) {
@@ -1102,8 +1113,8 @@ public class TaskEngine {
         return a.equalsIgnoreCase(b);
     }
 
-    private boolean isTransientStatus(String status) {
-        return "starting".equals(status) || "running".equals(status) || "detached".equals(status);
+    private boolean isTransientStatus(TaskStatus status) {
+        return status != null && status.isTransient();
     }
 
     private String tailLines(String text, int maxLines) {
@@ -1160,7 +1171,7 @@ public class TaskEngine {
             TaskIndexEntry entry = new TaskIndexEntry();
             entry.taskId = task.taskId;
             entry.runId = task.runId;
-            entry.status = task.status;
+            entry.status = task.status != null ? task.status.value() : null;
             entry.startTime = task.startTime;
             entry.endTime = task.endTime;
             entry.archived = task.archived;

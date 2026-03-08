@@ -11,7 +11,7 @@ public class Task {
     public int pid;
     public int pgid;
     public long pidStartTime;
-    public String status;
+    public TaskStatus status;
     public boolean alive;
     public long startTime;
     public Long endTime;

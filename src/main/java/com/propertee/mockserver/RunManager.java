@@ -322,13 +322,14 @@ public class RunManager {
         info.command = task.command;
         info.pid = task.pid;
         info.pgid = task.pgid;
-        info.status = obs != null ? obs.status : task.status;
+        info.status = obs != null ? obs.status : (task.status != null ? task.status.value() : null);
         info.alive = obs != null ? obs.alive : task.alive;
         info.archived = task.archived;
         info.elapsedMs = obs != null ? obs.elapsedMs : 0;
         info.lastStdoutAt = task.lastStdoutAt;
         info.lastStderrAt = task.lastStderrAt;
         info.lastOutputAgeMs = obs != null ? obs.lastOutputAgeMs : null;
+        info.timeoutExceeded = obs != null && obs.timeoutExceeded;
         info.exitCode = task.exitCode;
         info.cwd = task.cwd;
         info.hostInstanceId = task.hostInstanceId;

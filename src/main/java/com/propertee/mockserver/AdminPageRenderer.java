@@ -170,6 +170,12 @@ public class AdminPageRenderer {
         sb.append("<div class='card-header'><h2>").append(escape(taskId)).append("</h2>");
         sb.append("<form method='post' action='/admin/tasks/").append(urlPath(taskId)).append("/kill'>");
         sb.append("<button type='submit' class='btn-danger btn-sm'>Kill Task</button></form></div>");
+        if (info.timeoutExceeded) {
+            sb.append("<div class='callout callout-warn'>Task exceeded its configured timeout. This is a warning only; automatic kill is not performed.</div>");
+        }
+        if (info.healthHints != null && !info.healthHints.isEmpty()) {
+            sb.append("<div class='callout'>Health hints: ").append(escape(joinComma(info.healthHints))).append("</div>");
+        }
         sb.append("<div class='detail-grid'>");
         sb.append("<div class='detail-item'><div class='detail-label'>Status</div><div class='detail-value'>").append(statusBadge(info.status)).append("</div></div>");
         sb.append("<div class='detail-item'><div class='detail-label'>Archived</div><div class='detail-value'>").append(info.archived ? statusBadge("YES") : statusBadge("NO")).append("</div></div>");
@@ -178,6 +184,8 @@ public class AdminPageRenderer {
         sb.append("<div class='detail-item'><div class='detail-label'>PID</div><div class='detail-value mono'>").append(info.pid).append("</div></div>");
         sb.append("<div class='detail-item'><div class='detail-label'>PGID</div><div class='detail-value mono'>").append(info.pgid).append("</div></div>");
         sb.append("<div class='detail-item'><div class='detail-label'>Alive</div><div class='detail-value'>").append(info.alive ? statusBadge("RUNNING") : statusBadge("DONE")).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Timeout Exceeded</div><div class='detail-value'>").append(info.timeoutExceeded ? statusBadge("YES") : statusBadge("NO")).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Last Output Age</div><div class='detail-value'>").append(formatNullableElapsed(info.lastOutputAgeMs)).append("</div></div>");
         sb.append("</div>");
         sb.append("<div class='detail-grid'>");
         sb.append("<div class='detail-item'><div class='detail-label'>CWD</div><div class='detail-value'><code>").append(escape(info.cwd)).append("</code></div></div>");
@@ -258,7 +266,11 @@ public class AdminPageRenderer {
             }
             sb.append("</td>");
             sb.append("<td>").append(escape(task.threadName)).append(" <span class='dim'>#").append(escape(task.threadId)).append("</span></td>");
-            sb.append("<td>").append(statusBadge(task.status)).append("</td>");
+            sb.append("<td>").append(statusBadge(task.status));
+            if (task.timeoutExceeded) {
+                sb.append(" <span class='badge badge-timeout'>OVERDUE</span>");
+            }
+            sb.append("</td>");
             sb.append("<td class='mono center'>").append(task.pid).append("</td>");
             sb.append("<td class='center'>").append(task.alive ? statusBadge("RUNNING") : "<span class='dim'>no</span>").append("</td>");
             sb.append("<td class='dim'>").append(formatElapsed(task.elapsedMs)).append("</td>");
@@ -313,6 +325,7 @@ public class AdminPageRenderer {
         sb.append(".badge-completed,.badge-done{background:#dcfce7;color:#15803d;} ");
         sb.append(".badge-error,.badge-failed{background:#fee2e2;color:#b91c1c;} ");
         sb.append(".badge-killed{background:#fef3c7;color:#92400e;} ");
+        sb.append(".badge-timeout{background:#ffedd5;color:#c2410c;} ");
         sb.append(".badge-queued,.badge-pending,.badge-waiting,.badge-blocked{background:#f3e8ff;color:#7c3aed;} ");
         sb.append(".badge-ready{background:#e0f2fe;color:#0369a1;} ");
         sb.append(".badge-sleeping{background:#fef9c3;color:#854d0e;} ");
@@ -332,6 +345,8 @@ public class AdminPageRenderer {
         sb.append(".detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px;} ");
         sb.append(".detail-item{} .detail-item .detail-label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;} ");
         sb.append(".detail-item .detail-value{font-size:14px;margin-top:2px;} ");
+        sb.append(".callout{margin:0 0 12px 0;padding:12px 14px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13px;} ");
+        sb.append(".callout-warn{background:#fff7ed;border-color:#fdba74;color:#9a3412;} ");
         sb.append(".nav{display:flex;gap:12px;align-items:center;margin-bottom:16px;font-size:13px;} ");
         sb.append(".nav-sep{color:#cbd5e1;} ");
         sb.append("pre{background:#1e293b;color:#e2e8f0;padding:16px;border-radius:6px;overflow-x:auto;font-size:12px;");
@@ -445,10 +460,31 @@ public class AdminPageRenderer {
         return mins + "m " + secs + "s";
     }
 
+    private String formatNullableElapsed(Long ms) {
+        if (ms == null) {
+            return "";
+        }
+        return formatElapsed(ms.longValue());
+    }
+
     private String shortId(String id) {
         if (id == null) return "";
         if (id.length() <= 12) return id;
         return id.substring(0, 8) + "...";
+    }
+
+    private String joinComma(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(values.get(i));
+        }
+        return sb.toString();
     }
 
     private String urlPath(String value) {

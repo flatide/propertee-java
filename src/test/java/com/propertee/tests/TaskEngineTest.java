@@ -3,6 +3,7 @@ package com.propertee.tests;
 import com.propertee.task.Task;
 import com.propertee.task.TaskEngine;
 import com.propertee.task.TaskRequest;
+import com.propertee.task.TaskStatus;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -112,7 +113,7 @@ public class TaskEngineTest {
         Task result = engineA.waitForCompletion(task.taskId, 5000);
         Assert.assertNotNull(result);
         Assert.assertFalse(result.alive);
-        Assert.assertEquals("killed", result.status);
+        Assert.assertEquals(TaskStatus.KILLED, result.status);
     }
 
     @Test
@@ -131,14 +132,14 @@ public class TaskEngineTest {
             Task task = engine.execute(request);
             Task finished = engine.waitForCompletion(task.taskId, 5000);
             Assert.assertNotNull(finished);
-            Assert.assertEquals("completed", finished.status);
+            Assert.assertEquals(TaskStatus.COMPLETED, finished.status);
 
             engine.archiveExpiredTasks();
 
             Task archived = engine.getTask(task.taskId);
             Assert.assertNotNull(archived);
             Assert.assertTrue(archived.archived);
-            Assert.assertEquals("completed", archived.status);
+            Assert.assertEquals(TaskStatus.COMPLETED, archived.status);
             Assert.assertTrue(engine.getStdout(task.taskId).contains("out1"));
             Assert.assertTrue(engine.getStdout(task.taskId).contains("out2"));
             Assert.assertTrue(engine.getStderr(task.taskId).contains("err1"));

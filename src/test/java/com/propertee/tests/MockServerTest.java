@@ -221,6 +221,36 @@ public class MockServerTest {
     }
 
     @Test
+    public void serverShouldExposeTimeoutExceededOnTask() throws Exception {
+        TestServer testServer = createServer();
+        try {
+            writeScript(testServer.scriptsRoot, "timeout_task.pt",
+                "taskId = START_TASK(\"sleep 1\", {\"timeout\": 10})\n" +
+                "PRINT(taskId)\n");
+
+            Map<String, Object> submit = new LinkedHashMap<String, Object>();
+            submit.put("scriptPath", "timeout_task.pt");
+            submit.put("props", new LinkedHashMap<String, Object>());
+            String runId = (String) postJson(testServer.baseUrl + "/api/runs", submit, 202).get("runId");
+
+            Map<String, Object> detail = waitForRunWithTasks(testServer.baseUrl, runId, 1, 1, 8000L);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tasks = (List<Map<String, Object>>) detail.get("tasks");
+            String taskId = (String) tasks.get(0).get("taskId");
+
+            Map<String, Object> taskDetail = waitForTaskTimeoutExceeded(testServer.baseUrl, taskId, 4000L);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> taskInfo = (Map<String, Object>) taskDetail.get("task");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> observation = (Map<String, Object>) taskDetail.get("observation");
+            Assert.assertEquals(Boolean.TRUE, taskInfo.get("timeoutExceeded"));
+            Assert.assertEquals(Boolean.TRUE, observation.get("timeoutExceeded"));
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
     public void serverShouldArchiveOldRuns() throws Exception {
         String oldRunRetention = System.getProperty("propertee.mock.runRetentionMs");
         String oldRunArchiveRetention = System.getProperty("propertee.mock.runArchiveRetentionMs");
@@ -374,6 +404,21 @@ public class MockServerTest {
             Thread.sleep(100L);
         }
         Assert.fail("Timed out waiting for task status " + status + ": " + taskId);
+        return null;
+    }
+
+    private Map<String, Object> waitForTaskTimeoutExceeded(String baseUrl, String taskId, long timeoutMs) throws Exception {
+        long start = System.currentTimeMillis();
+        while ((System.currentTimeMillis() - start) < timeoutMs) {
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/tasks/" + taskId, 200);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> task = (Map<String, Object>) detail.get("task");
+            if (Boolean.TRUE.equals(task.get("timeoutExceeded"))) {
+                return detail;
+            }
+            Thread.sleep(100L);
+        }
+        Assert.fail("Timed out waiting for task timeoutExceeded: " + taskId);
         return null;
     }
 

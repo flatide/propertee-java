@@ -17,6 +17,7 @@ public class TaskInfo {
     public Long lastStdoutAt;
     public Long lastStderrAt;
     public Long lastOutputAgeMs;
+    public boolean timeoutExceeded;
     public Integer exitCode;
     public String cwd;
     public String hostInstanceId;
