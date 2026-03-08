@@ -42,16 +42,22 @@ public class BuiltinFunctions {
     private final String runId;
 
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr) {
+        this(stdout, stderr, null, null);
+    }
+
+    public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr, String runId, TaskEngine taskEngine) {
         this.stdout = stdout;
         this.stderr = stderr;
-        this.runId = createRunId();
-        this.taskEngine = getOrCreateTaskEngine(resolveTaskBaseDir());
+        this.runId = runId != null ? runId : createRunId();
+        this.taskEngine = taskEngine != null ? taskEngine : getOrCreateTaskEngine(resolveTaskBaseDir());
         registerDefaults();
     }
 
     public void setStdout(PrintFunction stdout) { this.stdout = stdout; }
     public PrintFunction getStdout() { return stdout; }
     public PrintFunction getStderr() { return stderr; }
+    public String getRunId() { return runId; }
+    public TaskEngine getTaskEngine() { return taskEngine; }
 
     private void registerDefaults() {
         functions.put("PRINT", new BuiltinFunction() {

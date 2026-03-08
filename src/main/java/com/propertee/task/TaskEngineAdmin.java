@@ -44,6 +44,18 @@ public class TaskEngineAdmin {
         return engine.observe(taskId);
     }
 
+    public String getStdout(String taskId) {
+        return engine.getStdout(taskId);
+    }
+
+    public String getStderr(String taskId) {
+        return engine.getStderr(taskId);
+    }
+
+    public String getCombinedOutput(String taskId) {
+        return engine.getCombinedOutput(taskId);
+    }
+
     // --- Control ---
 
     public boolean killTask(String taskId) {
@@ -75,8 +87,8 @@ public class TaskEngineAdmin {
         info.command = task.command;
         info.pid = task.pid;
         info.pgid = task.pgid;
-        info.status = task.status;
-        info.alive = task.alive;
+        info.status = obs != null ? obs.status : task.status;
+        info.alive = obs != null ? obs.alive : task.alive;
         info.elapsedMs = obs != null ? obs.elapsedMs : 0;
         info.lastStdoutAt = task.lastStdoutAt;
         info.lastStderrAt = task.lastStderrAt;

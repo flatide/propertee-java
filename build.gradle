@@ -139,3 +139,12 @@ task runAsyncDemo(type: JavaExec) {
     description = 'Run async external functions demo'
     group = 'application'
 }
+
+task runMockServer(type: JavaExec) {
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.propertee.mockserver.MockServerMain'
+    standardInput = System.in
+    description = 'Run ProperTee mock admin server'
+    group = 'application'
+}

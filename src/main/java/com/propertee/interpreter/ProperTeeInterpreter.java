@@ -83,12 +83,18 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     public ProperTeeInterpreter(Map<String, Object> properties, BuiltinFunctions.PrintFunction stdout,
                                  BuiltinFunctions.PrintFunction stderr, int maxIterations, String iterationLimitBehavior) {
+        this(properties, stdout, stderr, maxIterations, iterationLimitBehavior, null);
+    }
+
+    public ProperTeeInterpreter(Map<String, Object> properties, BuiltinFunctions.PrintFunction stdout,
+                                 BuiltinFunctions.PrintFunction stderr, int maxIterations, String iterationLimitBehavior,
+                                 BuiltinFunctions builtins) {
         this.properties = properties != null ? properties : new LinkedHashMap<String, Object>();
         this.stdout = stdout;
         this.stderr = stderr;
         this.maxIterations = maxIterations;
         this.iterationLimitBehavior = iterationLimitBehavior;
-        this.builtins = new BuiltinFunctions(stdout, stderr);
+        this.builtins = builtins != null ? builtins : new BuiltinFunctions(stdout, stderr);
         this.builtins.setInterpreter(this);
     }
 

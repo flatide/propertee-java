@@ -10,6 +10,7 @@ import java.util.concurrent.Future;
 
 public class Scheduler {
     private final ProperTeeInterpreter visitor;
+    private final SchedulerListener listener;
     private final Map<Integer, ThreadContext> threads = new LinkedHashMap<Integer, ThreadContext>();
     private int nextThreadId = 0;
     private Integer currentThreadId = null;
@@ -26,7 +27,12 @@ public class Scheduler {
     }
 
     public Scheduler(ProperTeeInterpreter visitor) {
+        this(visitor, null);
+    }
+
+    public Scheduler(ProperTeeInterpreter visitor, SchedulerListener listener) {
         this.visitor = visitor;
+        this.listener = listener;
     }
 
     public ThreadContext createThread(String name, Stepper stepper, Map<String, Object> globalSnapshot) {
@@ -34,6 +40,30 @@ public class Scheduler {
         ThreadContext thread = new ThreadContext(id, name, stepper, globalSnapshot);
         threads.put(id, thread);
         return thread;
+    }
+
+    private void notifyThreadCreated(ThreadContext thread) {
+        if (listener != null && thread != null && thread.id >= 0) {
+            listener.onThreadCreated(thread);
+        }
+    }
+
+    private void notifyThreadUpdated(ThreadContext thread) {
+        if (listener != null && thread != null && thread.id >= 0) {
+            listener.onThreadUpdated(thread);
+        }
+    }
+
+    private void notifyThreadCompleted(ThreadContext thread) {
+        if (listener != null && thread != null && thread.id >= 0) {
+            listener.onThreadCompleted(thread);
+        }
+    }
+
+    private void notifyThreadError(ThreadContext thread) {
+        if (listener != null && thread != null && thread.id >= 0) {
+            listener.onThreadError(thread);
+        }
     }
 
     private ThreadContext selectNextThread() {
@@ -58,6 +88,7 @@ public class Scheduler {
             if (thread.shouldWake(now)) {
                 thread.sleepUntil = null;
                 thread.markReady();
+                notifyThreadUpdated(thread);
             }
         }
     }
@@ -76,6 +107,7 @@ public class Scheduler {
                     thread.asyncFuture = null;
                     thread.asyncCacheKey = null;
                     thread.markReady();
+                    notifyThreadUpdated(thread);
                     continue;
                 }
                 if (thread.asyncFuture.isDone()) {
@@ -93,6 +125,7 @@ public class Scheduler {
                     thread.asyncFuture = null;
                     thread.asyncCacheKey = null;
                     thread.markReady();
+                    notifyThreadUpdated(thread);
                 }
             }
         }
@@ -121,6 +154,7 @@ public class Scheduler {
     private void processStepResult(ThreadContext thread, StepResult stepResult) {
         if (stepResult.isBoundary()) {
             thread.markReady();
+            notifyThreadUpdated(thread);
             return;
         }
 
@@ -130,6 +164,7 @@ public class Scheduler {
                 case SLEEP: {
                     long now = System.currentTimeMillis();
                     thread.markSleeping(now + cmd.getDuration());
+                    notifyThreadUpdated(thread);
                     return;
                 }
                 case SPAWN_THREADS: {
@@ -138,6 +173,7 @@ public class Scheduler {
                 }
                 case AWAIT_ASYNC: {
                     thread.markBlocked();
+                    notifyThreadUpdated(thread);
                     return;
                 }
             }
@@ -146,10 +182,12 @@ public class Scheduler {
         if (stepResult.isDone()) {
             thread.markCompleted(stepResult.getValue());
             notifyChildCompleted(thread);
+            notifyThreadCompleted(thread);
             return;
         }
 
         thread.markReady();
+        notifyThreadUpdated(thread);
     }
 
     private void handleSpawnThreads(ThreadContext parentThread, SchedulerCommand command) {
@@ -170,6 +208,7 @@ public class Scheduler {
             childThread.resultKeyName = resultKeyNames.get(i);
             childThread.localScope = spec.getLocalScope();
             childIds.add(childThread.id);
+            notifyThreadCreated(childThread);
         }
 
         // Set up monitor
@@ -199,6 +238,7 @@ public class Scheduler {
             }
             parentThread.resultCollection = collection;
         }
+        notifyThreadUpdated(parentThread);
     }
 
     private void notifyChildCompleted(ThreadContext childThread) {
@@ -223,6 +263,7 @@ public class Scheduler {
         }
 
         boolean allDone = parent.childCompleted(childThread.id);
+        notifyThreadUpdated(parent);
         if (allDone) {
             // Build payload with the live collection
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
@@ -300,6 +341,7 @@ public class Scheduler {
     /** Main scheduler loop */
     public Object run(Stepper mainStepper) {
         ThreadContext mainThread = createThread("main", mainStepper, visitor.variables);
+        notifyThreadCreated(mainThread);
 
         while (hasActiveThreads()) {
             long now = System.currentTimeMillis();
@@ -338,6 +380,7 @@ public class Scheduler {
 
             currentThreadId = thread.id;
             thread.markRunning();
+            notifyThreadUpdated(thread);
 
             // Set active thread on visitor
             visitor.activeThread = thread;
@@ -354,6 +397,7 @@ public class Scheduler {
             } catch (Throwable error) {
                 thread.markError(error);
                 notifyChildCompleted(thread);
+                notifyThreadError(thread);
 
                 if (thread.id == 0) {
                     throw (error instanceof RuntimeException) ? (RuntimeException) error : new RuntimeException(error);
