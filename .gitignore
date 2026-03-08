@@ -14,5 +14,8 @@ build/
 # Compiled classes
 *.class
 
+# Claude
+.claude/
+
 # OS
 .DS_Store

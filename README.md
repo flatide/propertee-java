@@ -318,7 +318,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (73 test cases)
+./gradlew test           # JUnit tests (79 test cases)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs
