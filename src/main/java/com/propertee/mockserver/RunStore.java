@@ -10,6 +10,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -18,12 +22,17 @@ import java.util.List;
 public class RunStore {
     private final File runsDir;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    private final Object indexLock = new Object();
+    private final File indexFile;
+    private final File indexTmpFile;
 
     public RunStore(File dataDir) {
         this.runsDir = new File(dataDir, "runs");
         if (!runsDir.exists()) {
             runsDir.mkdirs();
         }
+        this.indexFile = new File(runsDir, "index.json");
+        this.indexTmpFile = new File(runsDir, "index.json.tmp");
     }
 
     public synchronized void save(RunInfo run) {
@@ -41,6 +50,7 @@ public class RunStore {
                 }
             }
         }
+        updateIndex(run);
     }
 
     public synchronized RunInfo load(String runId) {
@@ -64,27 +74,41 @@ public class RunStore {
     }
 
     public synchronized List<RunInfo> loadAll() {
-        List<RunInfo> result = new ArrayList<RunInfo>();
-        File[] files = runsDir.listFiles();
-        if (files == null) {
-            return result;
-        }
-        Arrays.sort(files, new Comparator<File>() {
-            @Override
-            public int compare(File a, File b) {
-                return a.getName().compareTo(b.getName());
-            }
-        });
-        for (File file : files) {
-            if (!file.isFile() || !file.getName().endsWith(".json")) {
+        return query(null, 0, -1);
+    }
+
+    public synchronized List<RunInfo> query(String status, int offset, int limit) {
+        List<RunIndexEntry> entries = loadIndexEntriesLocked();
+        List<RunInfo> runs = new ArrayList<RunInfo>();
+        int safeOffset = offset < 0 ? 0 : offset;
+        int matched = 0;
+        for (RunIndexEntry entry : entries) {
+            if (status != null && !status.equalsIgnoreCase(entry.status)) {
                 continue;
             }
-            RunInfo run = load(stripSuffix(file.getName(), ".json"));
+            if (matched++ < safeOffset) {
+                continue;
+            }
+            if (limit > 0 && runs.size() >= limit) {
+                break;
+            }
+            RunInfo run = load(entry.runId);
             if (run != null) {
-                result.add(run);
+                runs.add(run);
             }
         }
-        return result;
+        return runs;
+    }
+
+    public synchronized void delete(String runId) {
+        if (runId == null) {
+            return;
+        }
+        File file = fileFor(runId);
+        if (file.exists() && !file.delete() && file.exists()) {
+            throw new RuntimeException("Failed to delete run " + runId);
+        }
+        removeIndex(runId);
     }
 
     private File fileFor(String runId) {
@@ -98,6 +122,129 @@ public class RunStore {
         return value;
     }
 
+    private void updateIndex(RunInfo run) {
+        if (run == null || run.runId == null) {
+            return;
+        }
+        synchronized (indexLock) {
+            List<RunIndexEntry> entries = loadIndexEntriesLocked();
+            RunIndexEntry updated = RunIndexEntry.fromRun(run);
+            boolean replaced = false;
+            for (int i = 0; i < entries.size(); i++) {
+                if (entries.get(i).runId.equals(run.runId)) {
+                    entries.set(i, updated);
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                entries.add(updated);
+            }
+            sortIndexEntries(entries);
+            writeIndexLocked(entries);
+        }
+    }
+
+    private void removeIndex(String runId) {
+        synchronized (indexLock) {
+            List<RunIndexEntry> entries = loadIndexEntriesLocked();
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                if (entries.get(i).runId.equals(runId)) {
+                    entries.remove(i);
+                }
+            }
+            writeIndexLocked(entries);
+        }
+    }
+
+    private List<RunIndexEntry> loadIndexEntriesLocked() {
+        synchronized (indexLock) {
+            if (!indexFile.exists()) {
+                return rebuildIndexLocked();
+            }
+            FileInputStream fis = null;
+            try {
+                fis = new FileInputStream(indexFile);
+                String json = readAll(fis);
+                RunIndexEntry[] parsed = gson.fromJson(json, RunIndexEntry[].class);
+                if (parsed == null) {
+                    return rebuildIndexLocked();
+                }
+                List<RunIndexEntry> entries = new ArrayList<RunIndexEntry>(Arrays.asList(parsed));
+                sortIndexEntries(entries);
+                return entries;
+            } catch (Exception e) {
+                return rebuildIndexLocked();
+            } finally {
+                if (fis != null) {
+                    try {
+                        fis.close();
+                    } catch (IOException ignore) {
+                    }
+                }
+            }
+        }
+    }
+
+    private List<RunIndexEntry> rebuildIndexLocked() {
+        File[] files = runsDir.listFiles();
+        List<RunIndexEntry> entries = new ArrayList<RunIndexEntry>();
+        if (files != null) {
+            for (File file : files) {
+                if (!file.isFile() || !file.getName().endsWith(".json") || "index.json".equals(file.getName())) {
+                    continue;
+                }
+                RunInfo run = load(stripSuffix(file.getName(), ".json"));
+                if (run != null) {
+                    entries.add(RunIndexEntry.fromRun(run));
+                }
+            }
+        }
+        sortIndexEntries(entries);
+        writeIndexLocked(entries);
+        return entries;
+    }
+
+    private void sortIndexEntries(List<RunIndexEntry> entries) {
+        java.util.Collections.sort(entries, new Comparator<RunIndexEntry>() {
+            @Override
+            public int compare(RunIndexEntry a, RunIndexEntry b) {
+                if (a.createdAt == b.createdAt) {
+                    return a.runId.compareTo(b.runId);
+                }
+                return a.createdAt < b.createdAt ? 1 : -1;
+            }
+        });
+    }
+
+    private void writeIndexLocked(List<RunIndexEntry> entries) {
+        Writer writer = null;
+        try {
+            writer = new OutputStreamWriter(new FileOutputStream(indexTmpFile), "UTF-8");
+            gson.toJson(entries, writer);
+            writer.close();
+            writer = null;
+            moveAtomically(indexTmpFile.toPath(), indexFile.toPath());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write run index: " + e.getMessage(), e);
+        } finally {
+            if (writer != null) {
+                try {
+                    writer.close();
+                } catch (IOException ignore) {
+                }
+            }
+        }
+    }
+
+    private void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
     private String readAll(InputStream input) throws IOException {
         StringBuilder sb = new StringBuilder();
         byte[] buffer = new byte[4096];
@@ -106,5 +253,25 @@ public class RunStore {
             sb.append(new String(buffer, 0, len, "UTF-8"));
         }
         return sb.toString();
+    }
+
+    private static class RunIndexEntry {
+        String runId;
+        String status;
+        boolean archived;
+        long createdAt;
+        Long endedAt;
+        String scriptPath;
+
+        static RunIndexEntry fromRun(RunInfo run) {
+            RunIndexEntry entry = new RunIndexEntry();
+            entry.runId = run.runId;
+            entry.status = run.status != null ? run.status.name() : null;
+            entry.archived = run.archived;
+            entry.createdAt = run.createdAt;
+            entry.endedAt = run.endedAt;
+            entry.scriptPath = run.scriptPath;
+            return entry;
+        }
     }
 }

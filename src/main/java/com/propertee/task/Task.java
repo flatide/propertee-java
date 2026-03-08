@@ -21,9 +21,13 @@ public class Task {
     public String hostInstanceId;
     public Long lastStdoutAt;
     public Long lastStderrAt;
+    public boolean archived;
+    public String stdoutTail;
+    public String stderrTail;
 
     public transient File taskDir;
     public transient File metaFile;
+    public transient File archiveFile;
     public transient File stdoutFile;
     public transient File stderrFile;
     public transient File exitCodeFile;
@@ -34,6 +38,7 @@ public class Task {
     public void bindFiles(File taskDirectory) {
         this.taskDir = taskDirectory;
         this.metaFile = new File(taskDirectory, "meta.json");
+        this.archiveFile = new File(taskDirectory, "archive.json");
         this.stdoutFile = new File(taskDirectory, "stdout.log");
         this.stderrFile = new File(taskDirectory, "stderr.log");
         this.exitCodeFile = new File(taskDirectory, "exit.code");

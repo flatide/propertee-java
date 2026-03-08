@@ -13,6 +13,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -29,6 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class TaskEngine {
     private static final long WAIT_POLL_MS = 100L;
+    private static final long DEFAULT_RETENTION_MS = 24L * 60L * 60L * 1000L;
+    private static final long DEFAULT_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
 
     private final File taskBaseDir;
     private final File tasksDir;
@@ -38,6 +44,11 @@ public class TaskEngine {
     private final boolean setsidAvailable;
     private final String taskIdPrefix;
     private final Set<String> ownedTaskIds = Collections.synchronizedSet(new HashSet<String>());
+    private final Object indexLock = new Object();
+    private final File indexFile;
+    private final File indexTmpFile;
+    private final long retentionMs;
+    private final long archiveRetentionMs;
 
     public TaskEngine(String baseDir, String hostInstanceId) {
         this.taskBaseDir = new File(baseDir);
@@ -48,6 +59,10 @@ public class TaskEngine {
         }
         this.setsidAvailable = isCommandAvailable("setsid");
         this.taskIdPrefix = sanitizeTaskIdPrefix(hostInstanceId);
+        this.indexFile = new File(tasksDir, "index.json");
+        this.indexTmpFile = new File(tasksDir, "index.json.tmp");
+        this.retentionMs = parseDurationProperty("propertee.task.retentionMs", DEFAULT_RETENTION_MS);
+        this.archiveRetentionMs = parseDurationProperty("propertee.task.archiveRetentionMs", DEFAULT_ARCHIVE_RETENTION_MS);
         initCounter();
     }
 
@@ -100,41 +115,19 @@ public class TaskEngine {
     }
 
     public List<Task> listTasks() {
-        List<Task> tasks = loadAllTasks();
-        for (Task task : tasks) {
-            refreshTask(task);
-        }
-        return tasks;
+        return queryTasks(null, null, 0, -1);
     }
 
     public List<Task> listRunning() {
-        List<Task> matches = new ArrayList<Task>();
-        for (Task task : listTasks()) {
-            if ("running".equals(task.status)) {
-                matches.add(task);
-            }
-        }
-        return matches;
+        return queryTasks(null, "running", 0, -1);
     }
 
     public List<Task> listDetached() {
-        List<Task> matches = new ArrayList<Task>();
-        for (Task task : listTasks()) {
-            if ("detached".equals(task.status)) {
-                matches.add(task);
-            }
-        }
-        return matches;
+        return queryTasks(null, "detached", 0, -1);
     }
 
     public List<Task> listByRun(String runId) {
-        List<Task> matches = new ArrayList<Task>();
-        for (Task task : listTasks()) {
-            if (equalsValue(runId, task.runId)) {
-                matches.add(task);
-            }
-        }
-        return matches;
+        return queryTasks(runId, null, 0, -1);
     }
 
     public List<Task> listByThread(int threadId) {
@@ -145,6 +138,20 @@ public class TaskEngine {
             }
         }
         return matches;
+    }
+
+    public List<Task> queryTasks(String runId, String status, int offset, int limit) {
+        List<TaskIndexEntry> entries = queryTaskIndex(runId, status, offset, limit);
+        List<Task> tasks = new ArrayList<Task>();
+        for (TaskIndexEntry entry : entries) {
+            Task task = getTask(entry.taskId);
+            if (task == null) {
+                continue;
+            }
+            refreshTask(task);
+            tasks.add(task);
+        }
+        return tasks;
     }
 
     public TaskObservation observe(String taskId) {
@@ -194,18 +201,27 @@ public class TaskEngine {
     public String getStdout(String taskId) {
         Task task = getTask(taskId);
         if (task == null) return "";
+        if (task.archived) return task.stdoutTail != null ? task.stdoutTail : "";
         return readFile(task.stdoutFile);
     }
 
     public String getStderr(String taskId) {
         Task task = getTask(taskId);
         if (task == null) return "";
+        if (task.archived) return task.stderrTail != null ? task.stderrTail : "";
         return readFile(task.stderrFile);
     }
 
     public String getCombinedOutput(String taskId) {
         Task task = getTask(taskId);
         if (task == null) return "";
+        if (task.archived) {
+            String stdout = task.stdoutTail != null ? task.stdoutTail : "";
+            String stderr = task.stderrTail != null ? task.stderrTail : "";
+            if (stderr.length() == 0) return stdout;
+            if (stdout.length() == 0) return stderr;
+            return stdout + "\n" + stderr;
+        }
         return combineOutputs(task);
     }
 
@@ -260,6 +276,26 @@ public class TaskEngine {
                 finalizeExitedTask(task);
             }
             saveMeta(task);
+        }
+    }
+
+    public void archiveExpiredTasks() {
+        long now = System.currentTimeMillis();
+        for (Task task : loadAllTasks()) {
+            if (task.alive || isTransientStatus(task.status)) {
+                continue;
+            }
+            long completedAt = task.endTime != null ? task.endTime.longValue() : task.startTime;
+            long ageMs = now - completedAt;
+            if (!task.archived) {
+                if (retentionMs >= 0 && ageMs >= retentionMs) {
+                    archiveTask(task);
+                }
+                continue;
+            }
+            if (archiveRetentionMs >= 0 && ageMs >= archiveRetentionMs) {
+                deleteArchivedTask(task);
+            }
         }
     }
 
@@ -329,15 +365,19 @@ public class TaskEngine {
 
     private Task loadTask(File taskDir) {
         File metaFile = new File(taskDir, "meta.json");
-        if (!metaFile.exists()) return null;
+        File archiveFile = new File(taskDir, "archive.json");
+        if (!metaFile.exists() && !archiveFile.exists()) return null;
 
         FileInputStream fis = null;
         try {
-            fis = new FileInputStream(metaFile);
+            fis = new FileInputStream(metaFile.exists() ? metaFile : archiveFile);
             String json = readStream(fis);
             Task task = gson.fromJson(json, Task.class);
             if (task == null) return null;
             task.bindFiles(taskDir);
+            if (!metaFile.exists() && archiveFile.exists()) {
+                task.archived = true;
+            }
             return task;
         } catch (Exception e) {
             return null;
@@ -356,6 +396,186 @@ public class TaskEngine {
         } finally {
             closeQuietly(writer);
         }
+        updateTaskIndex(task);
+    }
+
+    private void updateTaskIndex(Task task) {
+        if (task == null || task.taskId == null) {
+            return;
+        }
+        synchronized (indexLock) {
+            List<TaskIndexEntry> entries = loadTaskIndexEntriesLocked();
+            TaskIndexEntry updated = TaskIndexEntry.fromTask(task);
+            boolean replaced = false;
+            for (int i = 0; i < entries.size(); i++) {
+                if (equalsValue(entries.get(i).taskId, task.taskId)) {
+                    entries.set(i, updated);
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                entries.add(updated);
+            }
+            sortTaskIndexEntries(entries);
+            writeTaskIndexLocked(entries);
+        }
+    }
+
+    private List<TaskIndexEntry> queryTaskIndex(String runId, String status, int offset, int limit) {
+        List<TaskIndexEntry> filtered = new ArrayList<TaskIndexEntry>();
+        List<TaskIndexEntry> entries;
+        synchronized (indexLock) {
+            entries = loadTaskIndexEntriesLocked();
+        }
+        for (TaskIndexEntry entry : entries) {
+            if (runId != null && !equalsValue(runId, entry.runId)) {
+                continue;
+            }
+            if (status != null && !equalsIgnoreCase(status, entry.status)) {
+                continue;
+            }
+            filtered.add(entry);
+        }
+        return applyTaskPagination(filtered, offset, limit);
+    }
+
+    private List<TaskIndexEntry> applyTaskPagination(List<TaskIndexEntry> entries, int offset, int limit) {
+        int safeOffset = offset < 0 ? 0 : offset;
+        if (safeOffset >= entries.size()) {
+            return new ArrayList<TaskIndexEntry>();
+        }
+        int end = limit <= 0 ? entries.size() : Math.min(entries.size(), safeOffset + limit);
+        return new ArrayList<TaskIndexEntry>(entries.subList(safeOffset, end));
+    }
+
+    private List<TaskIndexEntry> loadTaskIndexEntriesLocked() {
+        if (!indexFile.exists()) {
+            return rebuildTaskIndexLocked();
+        }
+        FileInputStream fis = null;
+        try {
+            fis = new FileInputStream(indexFile);
+            String json = readStream(fis);
+            TaskIndexEntry[] parsed = gson.fromJson(json, TaskIndexEntry[].class);
+            if (parsed == null) {
+                return rebuildTaskIndexLocked();
+            }
+            List<TaskIndexEntry> entries = new ArrayList<TaskIndexEntry>(Arrays.asList(parsed));
+            sortTaskIndexEntries(entries);
+            return entries;
+        } catch (Exception e) {
+            return rebuildTaskIndexLocked();
+        } finally {
+            closeQuietly(fis);
+        }
+    }
+
+    private List<TaskIndexEntry> rebuildTaskIndexLocked() {
+        List<TaskIndexEntry> entries = new ArrayList<TaskIndexEntry>();
+        for (Task task : loadAllTasks()) {
+            entries.add(TaskIndexEntry.fromTask(task));
+        }
+        sortTaskIndexEntries(entries);
+        writeTaskIndexLocked(entries);
+        return entries;
+    }
+
+    private void sortTaskIndexEntries(List<TaskIndexEntry> entries) {
+        Collections.sort(entries, new Comparator<TaskIndexEntry>() {
+            @Override
+            public int compare(TaskIndexEntry a, TaskIndexEntry b) {
+                if (a.startTime == b.startTime) {
+                    String aId = a.taskId != null ? a.taskId : "";
+                    String bId = b.taskId != null ? b.taskId : "";
+                    return aId.compareTo(bId);
+                }
+                return a.startTime < b.startTime ? 1 : -1;
+            }
+        });
+    }
+
+    private void writeTaskIndexLocked(List<TaskIndexEntry> entries) {
+        Writer writer = null;
+        try {
+            writer = new OutputStreamWriter(new FileOutputStream(indexTmpFile), "UTF-8");
+            gson.toJson(entries, writer);
+            writer.close();
+            writer = null;
+            moveAtomically(indexTmpFile.toPath(), indexFile.toPath());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write task index: " + e.getMessage(), e);
+        } finally {
+            closeQuietly(writer);
+        }
+    }
+
+    private void removeTaskIndex(String taskId) {
+        if (taskId == null) {
+            return;
+        }
+        synchronized (indexLock) {
+            List<TaskIndexEntry> entries = loadTaskIndexEntriesLocked();
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                if (equalsValue(entries.get(i).taskId, taskId)) {
+                    entries.remove(i);
+                }
+            }
+            writeTaskIndexLocked(entries);
+        }
+    }
+
+    private void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private void archiveTask(Task task) {
+        if (task == null || task.archived) {
+            return;
+        }
+        task.archived = true;
+        task.alive = false;
+        task.stdoutTail = tailLines(readFile(task.stdoutFile), 50);
+        task.stderrTail = tailLines(readFile(task.stderrFile), 20);
+
+        Writer writer = null;
+        try {
+            writer = new OutputStreamWriter(new FileOutputStream(task.archiveFile), "UTF-8");
+            gson.toJson(task, writer);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to archive task " + task.taskId + ": " + e.getMessage(), e);
+        } finally {
+            closeQuietly(writer);
+        }
+
+        deleteQuietly(task.metaFile);
+        deleteQuietly(task.stdoutFile);
+        deleteQuietly(task.stderrFile);
+        deleteQuietly(task.exitCodeFile);
+        deleteQuietly(task.commandPidFile);
+        deleteQuietly(task.commandFile);
+        deleteQuietly(task.runnerFile);
+        updateTaskIndex(task);
+    }
+
+    private void deleteArchivedTask(Task task) {
+        if (task == null || task.taskDir == null) {
+            return;
+        }
+        removeTaskIndex(task.taskId);
+        deleteQuietly(task.archiveFile);
+        deleteQuietly(task.metaFile);
+        deleteQuietly(task.stdoutFile);
+        deleteQuietly(task.stderrFile);
+        deleteQuietly(task.exitCodeFile);
+        deleteQuietly(task.commandPidFile);
+        deleteQuietly(task.commandFile);
+        deleteQuietly(task.runnerFile);
+        deleteQuietly(task.taskDir);
     }
 
     private void writeCommandFiles(Task task, TaskRequest request) {
@@ -842,6 +1062,18 @@ public class TaskEngine {
         return sb.toString();
     }
 
+    private long parseDurationProperty(String name, long defaultValue) {
+        String raw = System.getProperty(name);
+        if (raw == null || raw.trim().length() == 0) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
     private boolean isCommandAvailable(String command) {
         Process process = null;
         try {
@@ -864,12 +1096,75 @@ public class TaskEngine {
         return a.equals(b);
     }
 
+    private boolean equalsIgnoreCase(String a, String b) {
+        if (a == null) return b == null;
+        if (b == null) return false;
+        return a.equalsIgnoreCase(b);
+    }
+
+    private boolean isTransientStatus(String status) {
+        return "starting".equals(status) || "running".equals(status) || "detached".equals(status);
+    }
+
+    private String tailLines(String text, int maxLines) {
+        if (text == null || text.length() == 0 || maxLines <= 0) {
+            return "";
+        }
+        String[] lines = text.split("\\r?\\n");
+        int start = Math.max(0, lines.length - maxLines);
+        StringBuilder sb = new StringBuilder();
+        for (int i = start; i < lines.length; i++) {
+            if (i > start) {
+                sb.append('\n');
+            }
+            sb.append(lines[i]);
+        }
+        return sb.toString();
+    }
+
+    private void deleteQuietly(File file) {
+        if (file == null || !file.exists()) {
+            return;
+        }
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteQuietly(child);
+                }
+            }
+        }
+        if (!file.delete() && file.exists()) {
+            // ignore best-effort cleanup
+        }
+    }
+
     private void closeQuietly(Closeable closeable) {
         if (closeable == null) return;
         try {
             closeable.close();
         } catch (IOException e) {
             // ignore
+        }
+    }
+
+    private static class TaskIndexEntry {
+        String taskId;
+        String runId;
+        String status;
+        long startTime;
+        Long endTime;
+        boolean archived;
+
+        static TaskIndexEntry fromTask(Task task) {
+            TaskIndexEntry entry = new TaskIndexEntry();
+            entry.taskId = task.taskId;
+            entry.runId = task.runId;
+            entry.status = task.status;
+            entry.startTime = task.startTime;
+            entry.endTime = task.endTime;
+            entry.archived = task.archived;
+            return entry;
         }
     }
 }

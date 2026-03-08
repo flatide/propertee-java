@@ -12,11 +12,14 @@ public class RunInfo {
     public String scriptPath;
     public String scriptAbsolutePath;
     public RunStatus status;
+    public boolean archived;
     public long createdAt;
     public Long startedAt;
     public Long endedAt;
     public int maxIterations;
     public String iterationLimitBehavior;
+    public boolean hasExplicitReturn;
+    public Object resultData;
     public String resultSummary;
     public String errorMessage;
     public Map<String, Object> properties = new LinkedHashMap<String, Object>();
@@ -30,11 +33,14 @@ public class RunInfo {
         copy.scriptPath = scriptPath;
         copy.scriptAbsolutePath = scriptAbsolutePath;
         copy.status = status;
+        copy.archived = archived;
         copy.createdAt = createdAt;
         copy.startedAt = startedAt;
         copy.endedAt = endedAt;
         copy.maxIterations = maxIterations;
         copy.iterationLimitBehavior = iterationLimitBehavior;
+        copy.hasExplicitReturn = hasExplicitReturn;
+        copy.resultData = copyValue(resultData);
         copy.resultSummary = resultSummary;
         copy.errorMessage = errorMessage;
         copy.properties = copyMap(properties);
@@ -51,5 +57,9 @@ public class RunInfo {
     private static Map<String, Object> copyMap(Map<String, Object> source) {
         if (source == null) return new LinkedHashMap<String, Object>();
         return (Map<String, Object>) TypeChecker.deepCopy(source);
+    }
+
+    private static Object copyValue(Object value) {
+        return TypeChecker.deepCopy(value);
     }
 }

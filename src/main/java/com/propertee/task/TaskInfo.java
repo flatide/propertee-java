@@ -12,6 +12,7 @@ public class TaskInfo {
     public int pgid;
     public String status;
     public boolean alive;
+    public boolean archived;
     public long elapsedMs;
     public Long lastStdoutAt;
     public Long lastStderrAt;

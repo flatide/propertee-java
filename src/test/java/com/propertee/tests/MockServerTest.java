@@ -106,6 +106,182 @@ public class MockServerTest {
         }
     }
 
+    @Test
+    public void serverShouldExposeStructuredResultContract() throws Exception {
+        TestServer testServer = createServer();
+        try {
+            writeScript(testServer.scriptsRoot, "return_result.pt",
+                "return {\"ok\": true, \"value\": 42}\n");
+            writeScript(testServer.scriptsRoot, "variable_result.pt",
+                "value = 41\n" +
+                "result = {\"ok\": true, \"value\": value + 1}\n");
+
+            Map<String, Object> submitReturn = new LinkedHashMap<String, Object>();
+            submitReturn.put("scriptPath", "return_result.pt");
+            submitReturn.put("props", new LinkedHashMap<String, Object>());
+            String returnRunId = (String) postJson(testServer.baseUrl + "/api/runs", submitReturn, 202).get("runId");
+
+            Map<String, Object> submitVariable = new LinkedHashMap<String, Object>();
+            submitVariable.put("scriptPath", "variable_result.pt");
+            submitVariable.put("props", new LinkedHashMap<String, Object>());
+            String variableRunId = (String) postJson(testServer.baseUrl + "/api/runs", submitVariable, 202).get("runId");
+
+            Map<String, Object> returnDetail = waitForRunStatus(testServer.baseUrl, returnRunId, "COMPLETED", 8000L);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> returnRun = (Map<String, Object>) returnDetail.get("run");
+            Assert.assertEquals(Boolean.TRUE, returnRun.get("hasExplicitReturn"));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> returnData = (Map<String, Object>) returnRun.get("resultData");
+            Assert.assertEquals(Boolean.TRUE, returnData.get("ok"));
+            Assert.assertEquals(42.0, ((Number) returnData.get("value")).doubleValue(), 0.0);
+
+            Map<String, Object> variableDetail = waitForRunStatus(testServer.baseUrl, variableRunId, "COMPLETED", 8000L);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> variableRun = (Map<String, Object>) variableDetail.get("run");
+            Assert.assertEquals(Boolean.FALSE, variableRun.get("hasExplicitReturn"));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> variableData = (Map<String, Object>) variableRun.get("resultData");
+            Assert.assertEquals(Boolean.TRUE, variableData.get("ok"));
+            Assert.assertEquals(42.0, ((Number) variableData.get("value")).doubleValue(), 0.0);
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
+    public void serverShouldRequireBearerTokenWhenConfigured() throws Exception {
+        TestServer testServer = createServer("secret-token");
+        try {
+            writeScript(testServer.scriptsRoot, "auth_result.pt",
+                "result = {\"ok\": true}\n");
+
+            assertStatus(testServer.baseUrl + "/api/runs", "GET", null, null, 401);
+
+            Map<String, Object> submit = new LinkedHashMap<String, Object>();
+            submit.put("scriptPath", "auth_result.pt");
+            submit.put("props", new LinkedHashMap<String, Object>());
+
+            assertStatus(testServer.baseUrl + "/api/runs", "POST", submit, null, 401);
+
+            Map<String, Object> created = postJson(testServer.baseUrl + "/api/runs", submit, 202, "secret-token");
+            String runId = (String) created.get("runId");
+            Assert.assertNotNull(runId);
+
+            Map<String, Object> detail = waitForRunStatus(testServer.baseUrl, runId, "COMPLETED", 8000L, "secret-token");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> run = (Map<String, Object>) detail.get("run");
+            Assert.assertEquals(Boolean.FALSE, run.get("hasExplicitReturn"));
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
+    public void serverShouldSupportRunAndTaskQueryParameters() throws Exception {
+        TestServer testServer = createServer();
+        try {
+            writeScript(testServer.scriptsRoot, "query_a.pt",
+                "taskA = START_TASK(\"echo a1\")\n" +
+                "taskB = START_TASK(\"echo a2\")\n" +
+                "result = [WAIT_TASK(taskA, 5000), WAIT_TASK(taskB, 5000)]\n");
+            writeScript(testServer.scriptsRoot, "query_b.pt",
+                "result = {\"name\": \"b\"}\n");
+
+            Map<String, Object> submitA = new LinkedHashMap<String, Object>();
+            submitA.put("scriptPath", "query_a.pt");
+            submitA.put("props", new LinkedHashMap<String, Object>());
+            String runA = (String) postJson(testServer.baseUrl + "/api/runs", submitA, 202).get("runId");
+
+            Map<String, Object> submitB = new LinkedHashMap<String, Object>();
+            submitB.put("scriptPath", "query_b.pt");
+            submitB.put("props", new LinkedHashMap<String, Object>());
+            String runB = (String) postJson(testServer.baseUrl + "/api/runs", submitB, 202).get("runId");
+
+            waitForRunStatus(testServer.baseUrl, runA, "COMPLETED", 8000L);
+            waitForRunStatus(testServer.baseUrl, runB, "COMPLETED", 8000L);
+
+            List<Map<String, Object>> completedRuns = getJsonList(testServer.baseUrl + "/api/runs?status=COMPLETED&offset=0&limit=1", 200);
+            Assert.assertEquals(1, completedRuns.size());
+            @SuppressWarnings("unchecked")
+            String runStatus = String.valueOf(completedRuns.get(0).get("status"));
+            Assert.assertEquals("COMPLETED", runStatus);
+
+            Map<String, Object> filteredTasks = getJsonMap(testServer.baseUrl + "/api/tasks?runId=" + runA + "&status=completed&offset=0&limit=1", 200);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tasks = (List<Map<String, Object>>) filteredTasks.get("tasks");
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> detached = (List<Map<String, Object>>) filteredTasks.get("detached");
+            Assert.assertEquals(1, tasks.size());
+            Assert.assertTrue(detached.isEmpty());
+            Assert.assertEquals(runA, tasks.get(0).get("runId"));
+            Assert.assertEquals("completed", tasks.get(0).get("status"));
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
+    public void serverShouldArchiveOldRuns() throws Exception {
+        String oldRunRetention = System.getProperty("propertee.mock.runRetentionMs");
+        String oldRunArchiveRetention = System.getProperty("propertee.mock.runArchiveRetentionMs");
+        System.setProperty("propertee.mock.runRetentionMs", "0");
+        System.setProperty("propertee.mock.runArchiveRetentionMs", "86400000");
+        try {
+            TestServer testServer = createServer();
+            try {
+                writeScript(testServer.scriptsRoot, "archive_run.pt",
+                    "PRINT(\"line1\")\n" +
+                    "PRINT(\"line2\")\n" +
+                    "result = {\"ok\": true}\n");
+
+                Map<String, Object> submit = new LinkedHashMap<String, Object>();
+                submit.put("scriptPath", "archive_run.pt");
+                submit.put("props", new LinkedHashMap<String, Object>());
+                String runId = (String) postJson(testServer.baseUrl + "/api/runs", submit, 202).get("runId");
+
+                Map<String, Object> completedDetail = waitForRunStatus(testServer.baseUrl, runId, "COMPLETED", 8000L);
+                @SuppressWarnings("unchecked")
+                Map<String, Object> completedRun = (Map<String, Object>) completedDetail.get("run");
+                Assert.assertEquals(Boolean.TRUE, completedRun.get("archived"));
+
+                List<Map<String, Object>> runsAfterArchive = getJsonList(testServer.baseUrl + "/api/runs", 200);
+                Assert.assertTrue(containsRun(runsAfterArchive, runId));
+            } finally {
+                testServer.close();
+            }
+        } finally {
+            restoreProperty("propertee.mock.runRetentionMs", oldRunRetention);
+            restoreProperty("propertee.mock.runArchiveRetentionMs", oldRunArchiveRetention);
+        }
+    }
+
+    @Test
+    public void serverShouldPurgeArchivedRuns() throws Exception {
+        String oldRunRetention = System.getProperty("propertee.mock.runRetentionMs");
+        String oldRunArchiveRetention = System.getProperty("propertee.mock.runArchiveRetentionMs");
+        System.setProperty("propertee.mock.runRetentionMs", "0");
+        System.setProperty("propertee.mock.runArchiveRetentionMs", "100");
+        try {
+            TestServer testServer = createServer();
+            try {
+                writeScript(testServer.scriptsRoot, "purge_run.pt",
+                    "result = {\"ok\": true}\n");
+
+                Map<String, Object> submit = new LinkedHashMap<String, Object>();
+                submit.put("scriptPath", "purge_run.pt");
+                submit.put("props", new LinkedHashMap<String, Object>());
+                String runId = (String) postJson(testServer.baseUrl + "/api/runs", submit, 202).get("runId");
+
+                waitForRunAbsentFromList(testServer.baseUrl, runId, 8000L);
+            } finally {
+                testServer.close();
+            }
+        } finally {
+            restoreProperty("propertee.mock.runRetentionMs", oldRunRetention);
+            restoreProperty("propertee.mock.runArchiveRetentionMs", oldRunArchiveRetention);
+        }
+    }
+
     private boolean hasThreadName(List<Map<String, Object>> threads, String name) {
         for (Map<String, Object> thread : threads) {
             if (name.equals(thread.get("name"))) {
@@ -133,10 +309,23 @@ public class MockServerTest {
         return false;
     }
 
+    private boolean containsRun(List<Map<String, Object>> runs, String runId) {
+        for (Map<String, Object> run : runs) {
+            if (runId.equals(run.get("runId"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Map<String, Object> waitForRunWithTasks(String baseUrl, String runId, int taskCount, int minThreads, long timeoutMs) throws Exception {
+        return waitForRunWithTasks(baseUrl, runId, taskCount, minThreads, timeoutMs, null);
+    }
+
+    private Map<String, Object> waitForRunWithTasks(String baseUrl, String runId, int taskCount, int minThreads, long timeoutMs, String bearerToken) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/runs/" + runId, 200);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/runs/" + runId, 200, bearerToken);
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> tasks = (List<Map<String, Object>>) detail.get("tasks");
             @SuppressWarnings("unchecked")
@@ -151,9 +340,13 @@ public class MockServerTest {
     }
 
     private Map<String, Object> waitForRunStatus(String baseUrl, String runId, String status, long timeoutMs) throws Exception {
+        return waitForRunStatus(baseUrl, runId, status, timeoutMs, null);
+    }
+
+    private Map<String, Object> waitForRunStatus(String baseUrl, String runId, String status, long timeoutMs, String bearerToken) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/runs/" + runId, 200);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/runs/" + runId, 200, bearerToken);
             @SuppressWarnings("unchecked")
             Map<String, Object> run = (Map<String, Object>) detail.get("run");
             if (status.equals(run.get("status"))) {
@@ -166,9 +359,13 @@ public class MockServerTest {
     }
 
     private Map<String, Object> waitForTaskStatus(String baseUrl, String taskId, String status, long timeoutMs) throws Exception {
+        return waitForTaskStatus(baseUrl, taskId, status, timeoutMs, null);
+    }
+
+    private Map<String, Object> waitForTaskStatus(String baseUrl, String taskId, String status, long timeoutMs, String bearerToken) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/tasks/" + taskId, 200);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/tasks/" + taskId, 200, bearerToken);
             @SuppressWarnings("unchecked")
             Map<String, Object> task = (Map<String, Object>) detail.get("task");
             if (status.equals(task.get("status"))) {
@@ -180,7 +377,23 @@ public class MockServerTest {
         return null;
     }
 
+    private void waitForRunAbsentFromList(String baseUrl, String runId, long timeoutMs) throws Exception {
+        long start = System.currentTimeMillis();
+        while ((System.currentTimeMillis() - start) < timeoutMs) {
+            List<Map<String, Object>> runs = getJsonList(baseUrl + "/api/runs", 200);
+            if (!containsRun(runs, runId)) {
+                return;
+            }
+            Thread.sleep(100L);
+        }
+        Assert.fail("Timed out waiting for run purge: " + runId);
+    }
+
     private TestServer createServer() throws Exception {
+        return createServer(null);
+    }
+
+    private TestServer createServer(String apiToken) throws Exception {
         File scriptsRoot = Files.createTempDirectory("propertee-mock-scripts").toFile();
         File dataDir = Files.createTempDirectory("propertee-mock-data").toFile();
 
@@ -190,6 +403,7 @@ public class MockServerTest {
         config.scriptsRoot = scriptsRoot;
         config.dataDir = dataDir;
         config.maxConcurrentRuns = 2;
+        config.apiToken = apiToken;
 
         MockAdminServer server = new MockAdminServer(config);
         server.start();
@@ -207,10 +421,17 @@ public class MockServerTest {
     }
 
     private Map<String, Object> postJson(String url, Map<String, Object> payload, int expectedStatus) throws IOException {
+        return postJson(url, payload, expectedStatus, null);
+    }
+
+    private Map<String, Object> postJson(String url, Map<String, Object> payload, int expectedStatus, String bearerToken) throws IOException {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        if (bearerToken != null) {
+            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
         byte[] body = gson.toJson(payload).getBytes("UTF-8");
         OutputStream out = conn.getOutputStream();
         try {
@@ -224,11 +445,56 @@ public class MockServerTest {
     }
 
     private Map<String, Object> getJsonMap(String url, int expectedStatus) throws IOException {
+        return getJsonMap(url, expectedStatus, null);
+    }
+
+    private Map<String, Object> getJsonMap(String url, int expectedStatus, String bearerToken) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setRequestMethod("GET");
+        if (bearerToken != null) {
+            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
+        int status = conn.getResponseCode();
+        Assert.assertEquals(expectedStatus, status);
+        return readJsonMap(conn);
+    }
+
+    private List<Map<String, Object>> getJsonList(String url, int expectedStatus) throws IOException {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("GET");
         int status = conn.getResponseCode();
         Assert.assertEquals(expectedStatus, status);
-        return readJsonMap(conn);
+        return readJsonList(conn);
+    }
+
+    private void assertStatus(String url, String method, Map<String, Object> payload, String bearerToken, int expectedStatus) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setRequestMethod(method);
+        if (bearerToken != null) {
+            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
+        if (payload != null) {
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            byte[] body = gson.toJson(payload).getBytes("UTF-8");
+            OutputStream out = conn.getOutputStream();
+            try {
+                out.write(body);
+            } finally {
+                out.close();
+            }
+        }
+        int status = conn.getResponseCode();
+        Assert.assertEquals(expectedStatus, status);
+        InputStream input = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+        if (input != null) {
+            try {
+                readAll(input);
+            } finally {
+                input.close();
+            }
+        }
+        conn.disconnect();
     }
 
     private Map<String, Object> readJsonMap(HttpURLConnection conn) throws IOException {
@@ -236,6 +502,17 @@ public class MockServerTest {
         try {
             String json = readAll(input);
             return gson.fromJson(json, mapType);
+        } finally {
+            input.close();
+            conn.disconnect();
+        }
+    }
+
+    private List<Map<String, Object>> readJsonList(HttpURLConnection conn) throws IOException {
+        InputStream input = conn.getInputStream();
+        try {
+            String json = readAll(input);
+            return gson.fromJson(json, listType);
         } finally {
             input.close();
             conn.disconnect();
@@ -265,6 +542,14 @@ public class MockServerTest {
 
         private void close() {
             server.stop();
+        }
+    }
+
+    private static void restoreProperty(String name, String value) {
+        if (value == null) {
+            System.clearProperty(name);
+        } else {
+            System.setProperty(name, value);
         }
     }
 }

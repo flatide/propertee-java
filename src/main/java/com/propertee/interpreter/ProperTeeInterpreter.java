@@ -173,7 +173,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     }
 
     // --- Create a Stepper for a statement/block ---
-    public Stepper createRootStepper(ProperTeeParser.RootContext ctx) {
+    public RootStepper createRootStepper(ProperTeeParser.RootContext ctx) {
         return new RootStepper(this, ctx);
     }
 
@@ -211,6 +211,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         private final List<ProperTeeParser.StatementContext> statements;
         private int index = 0;
         private Object result = null;
+        private boolean hasExplicitReturn = false;
         private boolean done = false;
         private boolean yieldBoundary = false;
         private Object sendValue;
@@ -268,6 +269,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         return StepResult.done(result);
                     }
                 } catch (ReturnException e) {
+                    hasExplicitReturn = true;
                     result = e.getValue();
                     done = true;
                     return StepResult.done(result);
@@ -284,6 +286,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         public boolean isDone() { return done; }
         @Override
         public Object getResult() { return result; }
+        public boolean hasExplicitReturn() { return hasExplicitReturn; }
         @Override
         public void setSendValue(Object value) { this.sendValue = value; }
     }

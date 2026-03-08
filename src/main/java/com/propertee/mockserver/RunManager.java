@@ -1,49 +1,39 @@
 package com.propertee.mockserver;
 
-import com.propertee.cli.Main;
-import com.propertee.interpreter.BuiltinFunctions;
-import com.propertee.interpreter.ProperTeeInterpreter;
-import com.propertee.parser.ProperTeeParser;
 import com.propertee.runtime.TypeChecker;
-import com.propertee.scheduler.Scheduler;
-import com.propertee.scheduler.SchedulerListener;
 import com.propertee.scheduler.ThreadContext;
 import com.propertee.task.Task;
 import com.propertee.task.TaskEngine;
 import com.propertee.task.TaskInfo;
 import com.propertee.task.TaskObservation;
-import com.propertee.stepper.Stepper;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.Charset;
-import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 
 public class RunManager {
     private static final int MAX_LOG_LINES = 200;
+    private static final int ARCHIVED_STDOUT_LINES = 50;
+    private static final int ARCHIVED_STDERR_LINES = 20;
+    private static final long DEFAULT_RUN_RETENTION_MS = 24L * 60L * 60L * 1000L;
+    private static final long DEFAULT_RUN_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
 
     private final File scriptsRoot;
     private final File dataDir;
-    private final RunStore runStore;
+    private final RunRegistry runRegistry;
     private final TaskEngine taskEngine;
     private final ThreadPoolExecutor runExecutor;
-    private final Map<String, RunInfo> runs = new ConcurrentHashMap<String, RunInfo>();
-    private final Map<String, Future<?>> activeRuns = new ConcurrentHashMap<String, Future<?>>();
+    private final ScriptExecutor scriptExecutor;
+    private final java.util.concurrent.ConcurrentHashMap<String, Future<?>> activeRuns = new java.util.concurrent.ConcurrentHashMap<String, Future<?>>();
 
     public RunManager(File scriptsRoot, File dataDir, int maxConcurrentRuns) {
         this.scriptsRoot = scriptsRoot;
@@ -54,11 +44,15 @@ public class RunManager {
         if (!this.dataDir.exists()) {
             this.dataDir.mkdirs();
         }
-        this.runStore = new RunStore(this.dataDir);
+        long runRetentionMs = parseDurationProperty("propertee.mock.runRetentionMs", DEFAULT_RUN_RETENTION_MS);
+        long runArchiveRetentionMs = parseDurationProperty("propertee.mock.runArchiveRetentionMs", DEFAULT_RUN_ARCHIVE_RETENTION_MS);
+        this.runRegistry = new RunRegistry(this.dataDir, MAX_LOG_LINES, ARCHIVED_STDOUT_LINES, ARCHIVED_STDERR_LINES, runRetentionMs, runArchiveRetentionMs);
         this.taskEngine = new TaskEngine(this.dataDir.getAbsolutePath(), createHostInstanceId());
         this.taskEngine.init();
+        this.taskEngine.archiveExpiredTasks();
+        this.scriptExecutor = new ScriptExecutor();
         this.runExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Math.max(1, maxConcurrentRuns));
-        loadPersistedRuns();
+        maintainRuns();
     }
 
     public RunInfo submit(final RunRequest request) {
@@ -72,8 +66,7 @@ public class RunManager {
         run.maxIterations = request.maxIterations > 0 ? request.maxIterations : 1000;
         run.iterationLimitBehavior = request.warnLoops ? "warn" : "error";
         run.properties = sanitizeProperties(request.props);
-        runs.put(run.runId, run);
-        saveRun(run);
+        runRegistry.register(run);
 
         Future<?> future = runExecutor.submit(new Runnable() {
             @Override
@@ -82,66 +75,64 @@ public class RunManager {
             }
         });
         activeRuns.put(run.runId, future);
-        return copyRun(run);
+        return run.copy();
     }
 
     public List<RunInfo> listRuns() {
-        List<RunInfo> list = new ArrayList<RunInfo>();
-        for (RunInfo run : runs.values()) {
-            list.add(copyRun(run));
-        }
-        Collections.sort(list, new Comparator<RunInfo>() {
-            @Override
-            public int compare(RunInfo a, RunInfo b) {
-                if (a.createdAt == b.createdAt) return a.runId.compareTo(b.runId);
-                return a.createdAt < b.createdAt ? 1 : -1;
-            }
-        });
-        return list;
+        return listRuns(null, 0, -1);
+    }
+
+    public List<RunInfo> listRuns(String status, int offset, int limit) {
+        maintainRuns();
+        return runRegistry.listRuns(status, offset, limit);
     }
 
     public RunInfo getRun(String runId) {
-        RunInfo run = runs.get(runId);
-        return run != null ? copyRun(run) : null;
+        maintainRuns();
+        return runRegistry.getRun(runId);
     }
 
     public List<RunThreadInfo> listThreads(String runId) {
-        RunInfo run = runs.get(runId);
-        if (run == null) {
-            return new ArrayList<RunThreadInfo>();
-        }
-        synchronized (run) {
-            return copyThreads(run.threads);
-        }
+        maintainRuns();
+        return runRegistry.listThreads(runId);
     }
 
     public List<TaskInfo> listTasksForRun(String runId) {
-        return toInfoList(taskEngine.listByRun(runId));
+        return listTasks(runId, null, 0, -1);
     }
 
     public List<TaskInfo> listAllTasks() {
-        return toInfoList(taskEngine.listTasks());
+        return listTasks(null, null, 0, -1);
     }
 
     public List<TaskInfo> listDetachedTasks() {
-        return toInfoList(taskEngine.listDetached());
+        return listTasks(null, "detached", 0, -1);
+    }
+
+    public List<TaskInfo> listTasks(String runId, String status, int offset, int limit) {
+        maintainTasks();
+        return toInfoList(taskEngine.queryTasks(runId, status, offset, limit));
     }
 
     public TaskInfo getTask(String taskId) {
+        maintainTasks();
         Task task = taskEngine.getTask(taskId);
         if (task == null) return null;
         return toInfo(task);
     }
 
     public TaskObservation observeTask(String taskId) {
+        maintainTasks();
         return taskEngine.observe(taskId);
     }
 
     public String getTaskStdout(String taskId) {
+        maintainTasks();
         return taskEngine.getStdout(taskId);
     }
 
     public String getTaskStderr(String taskId) {
+        maintainTasks();
         return taskEngine.getStderr(taskId);
     }
 
@@ -165,130 +156,58 @@ public class RunManager {
         runExecutor.shutdownNow();
     }
 
-    private void loadPersistedRuns() {
-        List<RunInfo> existing = runStore.loadAll();
-        long now = System.currentTimeMillis();
-        for (RunInfo run : existing) {
-            if (run.status != null && !isTerminal(run.status)) {
-                run.status = RunStatus.SERVER_RESTARTED;
-                if (run.endedAt == null) {
-                    run.endedAt = Long.valueOf(now);
-                }
-                if (run.errorMessage == null || run.errorMessage.length() == 0) {
-                    run.errorMessage = "Server restarted before run finished";
-                }
-                runStore.save(run);
-            }
-            runs.put(run.runId, run);
-        }
-    }
-
     private void executeRun(final RunInfo run, File scriptFile) {
-        ProperTeeInterpreter visitor = null;
         try {
-            markRunStarted(run);
-            String scriptText = readFile(scriptFile);
-            List<String> errors = new ArrayList<String>();
-            ProperTeeParser.RootContext tree = Main.parseScript(scriptText, errors);
-            if (tree == null) {
-                markRunFailed(run, joinErrors(errors));
-                return;
+            runRegistry.markStarted(run);
+            ScriptExecutor.ExecutionResult result = scriptExecutor.execute(
+                scriptFile,
+                run.properties,
+                run.maxIterations,
+                run.iterationLimitBehavior,
+                run.runId,
+                taskEngine,
+                new ScriptExecutor.Callbacks() {
+                    @Override
+                    public void onStdout(String line) {
+                        runRegistry.appendLog(run, true, line);
+                    }
+
+                    @Override
+                    public void onStderr(String line) {
+                        runRegistry.appendLog(run, false, line);
+                    }
+
+                    @Override
+                    public void onThreadCreated(ThreadContext thread) {
+                        runRegistry.upsertThread(run, createThreadSnapshot(thread));
+                    }
+
+                    @Override
+                    public void onThreadUpdated(ThreadContext thread) {
+                        runRegistry.upsertThread(run, createThreadSnapshot(thread));
+                    }
+
+                    @Override
+                    public void onThreadCompleted(ThreadContext thread) {
+                        runRegistry.upsertThread(run, createThreadSnapshot(thread));
+                    }
+
+                    @Override
+                    public void onThreadError(ThreadContext thread) {
+                        runRegistry.upsertThread(run, createThreadSnapshot(thread));
+                    }
+                }
+            );
+            if (result.success) {
+                runRegistry.markCompleted(run, result.hasExplicitReturn, result.resultData);
+            } else {
+                runRegistry.markFailed(run, result.errorMessage);
             }
-
-            BuiltinFunctions.PrintFunction stdout = new BuiltinFunctions.PrintFunction() {
-                @Override
-                public void print(Object[] args) {
-                    appendLog(run, true, joinPrintArgs(args));
-                }
-            };
-            BuiltinFunctions.PrintFunction stderr = new BuiltinFunctions.PrintFunction() {
-                @Override
-                public void print(Object[] args) {
-                    appendLog(run, false, joinPrintArgs(args));
-                }
-            };
-
-            BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, run.runId, taskEngine);
-            visitor = new ProperTeeInterpreter(run.properties, stdout, stderr, run.maxIterations, run.iterationLimitBehavior, builtins);
-            Scheduler scheduler = new Scheduler(visitor, new RunSchedulerListener(run));
-            Stepper mainStepper = visitor.createRootStepper(tree);
-            Object result = scheduler.run(mainStepper);
-            markRunCompleted(run, result);
         } catch (Throwable error) {
-            markRunFailed(run, error != null ? error.getMessage() : "Unknown error");
+            runRegistry.markFailed(run, error != null ? error.getMessage() : "Unknown error");
         } finally {
             activeRuns.remove(run.runId);
-            if (visitor != null) {
-                visitor.builtins.shutdown();
-            }
         }
-    }
-
-    private void markRunStarted(RunInfo run) {
-        synchronized (run) {
-            run.status = RunStatus.RUNNING;
-            run.startedAt = Long.valueOf(System.currentTimeMillis());
-            if (run.endedAt != null) {
-                run.endedAt = null;
-            }
-            saveRunLocked(run);
-        }
-    }
-
-    private void markRunCompleted(RunInfo run, Object result) {
-        synchronized (run) {
-            run.status = RunStatus.COMPLETED;
-            run.endedAt = Long.valueOf(System.currentTimeMillis());
-            run.resultSummary = safeSummary(result);
-            saveRunLocked(run);
-        }
-    }
-
-    private void markRunFailed(RunInfo run, String message) {
-        synchronized (run) {
-            run.status = RunStatus.FAILED;
-            run.endedAt = Long.valueOf(System.currentTimeMillis());
-            run.errorMessage = message != null ? message : "Unknown error";
-            saveRunLocked(run);
-        }
-    }
-
-    private void appendLog(RunInfo run, boolean stdout, String line) {
-        synchronized (run) {
-            List<String> target = stdout ? run.stdoutLines : run.stderrLines;
-            target.add(line);
-            while (target.size() > MAX_LOG_LINES) {
-                target.remove(0);
-            }
-            saveRunLocked(run);
-        }
-    }
-
-    private void upsertThread(RunInfo run, RunThreadInfo threadInfo) {
-        synchronized (run) {
-            int idx = findThreadIndex(run.threads, threadInfo.threadId);
-            if (idx >= 0) {
-                run.threads.set(idx, threadInfo);
-            } else {
-                run.threads.add(threadInfo);
-                Collections.sort(run.threads, new Comparator<RunThreadInfo>() {
-                    @Override
-                    public int compare(RunThreadInfo a, RunThreadInfo b) {
-                        return a.threadId < b.threadId ? -1 : (a.threadId == b.threadId ? 0 : 1);
-                    }
-                });
-            }
-            saveRunLocked(run);
-        }
-    }
-
-    private int findThreadIndex(List<RunThreadInfo> threads, int threadId) {
-        for (int i = 0; i < threads.size(); i++) {
-            if (threads.get(i).threadId == threadId) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private RunThreadInfo createThreadSnapshot(ThreadContext thread) {
@@ -303,7 +222,7 @@ public class RunManager {
         info.resultKeyName = thread.resultKeyName;
         info.updatedAt = System.currentTimeMillis();
         if (thread.result != null) {
-            info.resultSummary = safeSummary(thread.result);
+            info.resultSummary = summarizeValue(thread.result);
         }
         if (thread.error != null) {
             info.errorMessage = thread.error.getMessage();
@@ -311,7 +230,7 @@ public class RunManager {
         return info;
     }
 
-    private String safeSummary(Object value) {
+    private String summarizeValue(Object value) {
         try {
             String formatted = TypeChecker.formatValue(value);
             if (formatted != null && formatted.length() > 300) {
@@ -321,34 +240,6 @@ public class RunManager {
         } catch (Exception e) {
             return String.valueOf(value);
         }
-    }
-
-    private List<RunThreadInfo> copyThreads(List<RunThreadInfo> threads) {
-        List<RunThreadInfo> copy = new ArrayList<RunThreadInfo>();
-        for (RunThreadInfo thread : threads) {
-            copy.add(thread.copy());
-        }
-        return copy;
-    }
-
-    private RunInfo copyRun(RunInfo run) {
-        synchronized (run) {
-            return run.copy();
-        }
-    }
-
-    private void saveRun(RunInfo run) {
-        synchronized (run) {
-            saveRunLocked(run);
-        }
-    }
-
-    private void saveRunLocked(RunInfo run) {
-        runStore.save(run.copy());
-    }
-
-    private boolean isTerminal(RunStatus status) {
-        return status == RunStatus.COMPLETED || status == RunStatus.FAILED || status == RunStatus.SERVER_RESTARTED;
     }
 
     private File resolveScriptPath(String scriptPath) {
@@ -384,46 +275,6 @@ public class RunManager {
         return (Map<String, Object>) TypeChecker.deepCopy(props);
     }
 
-    private String joinErrors(List<String> errors) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < errors.size(); i++) {
-            if (i > 0) sb.append("\n");
-            sb.append(errors.get(i));
-        }
-        return sb.toString();
-    }
-
-    private String joinPrintArgs(Object[] args) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < args.length; i++) {
-            if (i > 0) sb.append(' ');
-            sb.append(args[i]);
-        }
-        return sb.toString();
-    }
-
-    private String readFile(File file) throws IOException {
-        InputStream input = null;
-        try {
-            input = new FileInputStream(file);
-            byte[] bytes = new byte[(int) file.length()];
-            int offset = 0;
-            while (offset < bytes.length) {
-                int read = input.read(bytes, offset, bytes.length - offset);
-                if (read < 0) break;
-                offset += read;
-            }
-            return new String(bytes, 0, offset, Charset.forName("UTF-8"));
-        } finally {
-            if (input != null) {
-                try {
-                    input.close();
-                } catch (IOException ignore) {
-                }
-            }
-        }
-    }
-
     private static String createRunId() {
         return "run-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ENGLISH).format(new Date()) +
             "-" + Integer.toHexString((int) (System.nanoTime() & 0xffff));
@@ -434,31 +285,22 @@ public class RunManager {
             "-" + Integer.toHexString((int) (System.nanoTime() & 0xffff));
     }
 
-    private class RunSchedulerListener implements SchedulerListener {
-        private final RunInfo run;
-
-        private RunSchedulerListener(RunInfo run) {
-            this.run = run;
+    private void maintainRuns() {
+        List<String> purgedRunIds = runRegistry.maintainRuns();
+        for (String runId : purgedRunIds) {
+            activeRuns.remove(runId);
         }
+    }
 
-        @Override
-        public void onThreadCreated(ThreadContext thread) {
-            upsertThread(run, createThreadSnapshot(thread));
+    private long parseDurationProperty(String name, long defaultValue) {
+        String raw = System.getProperty(name);
+        if (raw == null || raw.trim().length() == 0) {
+            return defaultValue;
         }
-
-        @Override
-        public void onThreadUpdated(ThreadContext thread) {
-            upsertThread(run, createThreadSnapshot(thread));
-        }
-
-        @Override
-        public void onThreadCompleted(ThreadContext thread) {
-            upsertThread(run, createThreadSnapshot(thread));
-        }
-
-        @Override
-        public void onThreadError(ThreadContext thread) {
-            upsertThread(run, createThreadSnapshot(thread));
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
     }
 
@@ -482,6 +324,7 @@ public class RunManager {
         info.pgid = task.pgid;
         info.status = obs != null ? obs.status : task.status;
         info.alive = obs != null ? obs.alive : task.alive;
+        info.archived = task.archived;
         info.elapsedMs = obs != null ? obs.elapsedMs : 0;
         info.lastStdoutAt = task.lastStdoutAt;
         info.lastStderrAt = task.lastStderrAt;
@@ -491,5 +334,9 @@ public class RunManager {
         info.hostInstanceId = task.hostInstanceId;
         info.healthHints = obs != null ? obs.healthHints : new ArrayList<String>();
         return info;
+    }
+
+    private void maintainTasks() {
+        taskEngine.archiveExpiredTasks();
     }
 }

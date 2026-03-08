@@ -115,6 +115,68 @@ public class TaskEngineTest {
         Assert.assertEquals("killed", result.status);
     }
 
+    @Test
+    public void archiveShouldPreserveTaskSummaryAndOutputTails() throws Exception {
+        String oldRetention = System.getProperty("propertee.task.retentionMs");
+        String oldArchiveRetention = System.getProperty("propertee.task.archiveRetentionMs");
+        System.setProperty("propertee.task.retentionMs", "0");
+        System.setProperty("propertee.task.archiveRetentionMs", "86400000");
+        try {
+            File baseDir = Files.createTempDirectory("propertee-task-engine-archive").toFile();
+            TaskEngine engine = new TaskEngine(baseDir.getAbsolutePath(), "host-a");
+
+            TaskRequest request = new TaskRequest();
+            request.command = "printf 'out1\\nout2\\n'; printf 'err1\\n' 1>&2";
+
+            Task task = engine.execute(request);
+            Task finished = engine.waitForCompletion(task.taskId, 5000);
+            Assert.assertNotNull(finished);
+            Assert.assertEquals("completed", finished.status);
+
+            engine.archiveExpiredTasks();
+
+            Task archived = engine.getTask(task.taskId);
+            Assert.assertNotNull(archived);
+            Assert.assertTrue(archived.archived);
+            Assert.assertEquals("completed", archived.status);
+            Assert.assertTrue(engine.getStdout(task.taskId).contains("out1"));
+            Assert.assertTrue(engine.getStdout(task.taskId).contains("out2"));
+            Assert.assertTrue(engine.getStderr(task.taskId).contains("err1"));
+            Assert.assertTrue(engine.listTasks().get(0).archived);
+        } finally {
+            restoreProperty("propertee.task.retentionMs", oldRetention);
+            restoreProperty("propertee.task.archiveRetentionMs", oldArchiveRetention);
+        }
+    }
+
+    @Test
+    public void archivedTaskShouldBePurgedAfterArchiveRetention() throws Exception {
+        String oldRetention = System.getProperty("propertee.task.retentionMs");
+        String oldArchiveRetention = System.getProperty("propertee.task.archiveRetentionMs");
+        System.setProperty("propertee.task.retentionMs", "0");
+        System.setProperty("propertee.task.archiveRetentionMs", "0");
+        try {
+            File baseDir = Files.createTempDirectory("propertee-task-engine-purge").toFile();
+            TaskEngine engine = new TaskEngine(baseDir.getAbsolutePath(), "host-a");
+
+            TaskRequest request = new TaskRequest();
+            request.command = "echo purge-me";
+
+            Task task = engine.execute(request);
+            Task finished = engine.waitForCompletion(task.taskId, 5000);
+            Assert.assertNotNull(finished);
+
+            engine.archiveExpiredTasks();
+            Assert.assertNotNull(engine.getTask(task.taskId));
+
+            engine.archiveExpiredTasks();
+            Assert.assertNull(engine.getTask(task.taskId));
+        } finally {
+            restoreProperty("propertee.task.retentionMs", oldRetention);
+            restoreProperty("propertee.task.archiveRetentionMs", oldArchiveRetention);
+        }
+    }
+
     private static void waitForFile(File file, long timeoutMs) throws InterruptedException {
         long start = System.currentTimeMillis();
         while (!file.exists() && (System.currentTimeMillis() - start) < timeoutMs) {
@@ -142,5 +204,13 @@ public class TaskEngineTest {
 
     private static String shellEscape(String value) {
         return value.replace("'", "'\"'\"'");
+    }
+
+    private static void restoreProperty(String name, String value) {
+        if (value == null) {
+            System.clearProperty(name);
+        } else {
+            System.setProperty(name, value);
+        }
     }
 }

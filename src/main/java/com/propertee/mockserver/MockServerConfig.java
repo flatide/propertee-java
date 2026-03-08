@@ -9,6 +9,7 @@ public class MockServerConfig {
     public File scriptsRoot;
     public File dataDir;
     public int maxConcurrentRuns = 4;
+    public String apiToken;
 
     public static MockServerConfig fromSystemProperties() {
         MockServerConfig config = new MockServerConfig();
@@ -31,6 +32,10 @@ public class MockServerConfig {
         String maxRuns = System.getProperty("propertee.mock.maxRuns");
         if (maxRuns != null && maxRuns.trim().length() > 0) {
             config.maxConcurrentRuns = Integer.parseInt(maxRuns.trim());
+        }
+        String apiToken = System.getProperty("propertee.mock.apiToken");
+        if (apiToken != null && apiToken.trim().length() > 0) {
+            config.apiToken = apiToken.trim();
         }
         config.scriptsRoot = canonicalFile(new File(scriptsRoot.trim()));
         config.dataDir = canonicalFile(new File(dataDir.trim()));
