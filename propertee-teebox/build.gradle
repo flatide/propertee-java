@@ -17,7 +17,7 @@ application {
 run {
     standardInput = System.in
     systemProperties System.properties.findAll { key, value ->
-        key.startsWith('propertee.teebox.') || key.startsWith('propertee.mock.') || key.startsWith('propertee.task.')
+        key.startsWith('propertee.teebox.') || key.startsWith('propertee.task.')
     }
 }
 

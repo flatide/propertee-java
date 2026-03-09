@@ -315,7 +315,7 @@ HTTP Request → MockAdminServer
 | `RunRegistry` | In-memory run state cache (ConcurrentHashMap) backed by RunStore. Handles run lifecycle (QUEUED → RUNNING → COMPLETED/FAILED), log ring buffers (200 lines), archiving (24h retention → trim logs → 7d purge). On server restart, non-terminal runs marked `SERVER_RESTARTED`. |
 | `RunStore` | File-based persistence for RunInfo. Index-based pagination (`runs/index.json`) with atomic write via tmp+move. All public methods `synchronized`. |
 | `AdminPageRenderer` | HTML page generation for admin UI (extracted from MockAdminServer). |
-| `MockServerConfig` | Configuration via system properties (`propertee.mock.*`): bind address, port, scriptsRoot, dataDir, maxConcurrentRuns, apiToken. |
+| `TeeBoxConfig` | Configuration via system properties (`propertee.teebox.*`): bind address, port, scriptsRoot, dataDir, maxConcurrentRuns, apiToken. |
 
 ### TaskEngine (`com.propertee.task`)
 
@@ -334,9 +334,9 @@ Manages detached shell processes. Used by both SHELL()/START_TASK() builtins and
 ```bash
 # Run mock server
 ./gradlew runMockServer \
-  -Dpropertee.mock.scriptsRoot=./sample \
-  -Dpropertee.mock.dataDir=/tmp/propertee-data \
-  -Dpropertee.mock.apiToken=secret
+  -Dpropertee.teebox.scriptsRoot=./sample \
+  -Dpropertee.teebox.dataDir=/tmp/propertee-data \
+  -Dpropertee.teebox.apiToken=secret
 
 # API endpoints (Bearer token required if apiToken set)
 POST /api/runs                     # submit script execution

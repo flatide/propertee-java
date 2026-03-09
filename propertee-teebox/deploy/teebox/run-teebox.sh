@@ -3,7 +3,7 @@ set -eu
 
 BASE_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 JAR_FILE="$BASE_DIR/lib/propertee-teebox.jar"
-CONF_FILE=${PROPERTEE_TEEBOX_CONFIG:-${PROPERTEE_MOCK_CONFIG:-"$BASE_DIR/conf/teebox.properties"}}
+CONF_FILE=${PROPERTEE_TEEBOX_CONFIG:-"$BASE_DIR/conf/teebox.properties"}
 JAVA_BIN=${JAVA_HOME:+$JAVA_HOME/bin/}java
 
 if [ ! -f "$JAR_FILE" ]; then

@@ -56,17 +56,11 @@ public class TeeBoxConfig {
     }
 
     private static String getSetting(String suffix, Properties fileProps) {
-        String sysValue = firstNonBlank(
-            System.getProperty("propertee.teebox." + suffix),
-            System.getProperty("propertee.mock." + suffix)
-        );
+        String sysValue = System.getProperty("propertee.teebox." + suffix);
         if (sysValue != null && sysValue.trim().length() > 0) {
             return sysValue;
         }
-        String fileValue = firstNonBlank(
-            fileProps.getProperty("propertee.teebox." + suffix),
-            fileProps.getProperty("propertee.mock." + suffix)
-        );
+        String fileValue = fileProps.getProperty("propertee.teebox." + suffix);
         if (fileValue != null && fileValue.trim().length() > 0) {
             return fileValue;
         }
@@ -74,10 +68,7 @@ public class TeeBoxConfig {
     }
 
     private static File resolveConfigFile(String[] args) {
-        String configured = firstNonBlank(
-            System.getProperty("propertee.teebox.config"),
-            System.getProperty("propertee.mock.config")
-        );
+        String configured = System.getProperty("propertee.teebox.config");
         if (configured != null && configured.trim().length() > 0) {
             return canonicalFile(new File(configured.trim()));
         }
@@ -131,15 +122,5 @@ public class TeeBoxConfig {
         } catch (IOException e) {
             throw new IllegalArgumentException("Failed to resolve path: " + file.getPath(), e);
         }
-    }
-
-    private static String firstNonBlank(String first, String second) {
-        if (first != null && first.trim().length() > 0) {
-            return first;
-        }
-        if (second != null && second.trim().length() > 0) {
-            return second;
-        }
-        return null;
     }
 }

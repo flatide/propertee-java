@@ -295,9 +295,6 @@ public class RunManager {
     private long parseDurationProperty(String suffix, long defaultValue) {
         String raw = System.getProperty("propertee.teebox." + suffix);
         if (raw == null || raw.trim().length() == 0) {
-            raw = System.getProperty("propertee.mock." + suffix);
-        }
-        if (raw == null || raw.trim().length() == 0) {
             return defaultValue;
         }
         try {

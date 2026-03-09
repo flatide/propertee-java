@@ -47,6 +47,7 @@ build/distributions/propertee-teebox-dist.zip
 ```
 
 Deployment bundle contents and startup instructions are documented in [`propertee-teebox/deploy/teebox/README.md`](propertee-teebox/deploy/teebox/README.md).
+Module overview and operator-facing notes are documented in [`propertee-teebox/README.md`](propertee-teebox/README.md).
 
 ## How the Stepper Pattern Works
 

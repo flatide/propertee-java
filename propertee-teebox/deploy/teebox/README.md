@@ -29,7 +29,6 @@ build/distributions/propertee-teebox-dist.zip
 The script accepts extra CLI arguments and respects:
 
 - `PROPERTEE_TEEBOX_CONFIG`
-- `PROPERTEE_MOCK_CONFIG` (legacy alias)
 - `JAVA_HOME`
 - `JAVA_OPTS`
 
