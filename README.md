@@ -32,21 +32,21 @@ java -jar build/libs/propertee-java-java8.jar
 ./test_all.sh all   # Run integration tests against both JARs
 ```
 
-## Mock Server Deployment
+## TeeBox Deployment
 
-Build a deployable mock server bundle:
+Build a deployable TeeBox server bundle:
 
 ```bash
-./gradlew mockServerZip
+./gradlew teeBoxZip
 ```
 
 Output:
 
 ```text
-build/distributions/propertee-mockserver-dist.zip
+build/distributions/propertee-teebox-dist.zip
 ```
 
-Deployment bundle contents and startup instructions are documented in [`propertee-mockserver/deploy/mockserver/README.md`](propertee-mockserver/deploy/mockserver/README.md).
+Deployment bundle contents and startup instructions are documented in [`propertee-teebox/deploy/teebox/README.md`](propertee-teebox/deploy/teebox/README.md).
 
 ## How the Stepper Pattern Works
 
