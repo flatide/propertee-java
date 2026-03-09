@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TaskEngine {
     private static final long WAIT_POLL_INITIAL_MS = 50L;
     private static final long WAIT_POLL_MAX_MS = 1000L;
+    private static final long TRACKED_PID_WAIT_MS = 3000L;
     private static final long DEFAULT_RETENTION_MS = 24L * 60L * 60L * 1000L;
     private static final long DEFAULT_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
 
@@ -767,7 +768,11 @@ public class TaskEngine {
 
     private int resolveTrackedPid(Task task, int launcherPid) {
         long start = System.currentTimeMillis();
-        while ((System.currentTimeMillis() - start) < 500L) {
+        // Detached launch returns quickly, but the inner shell may need a short grace period
+        // before it writes its stable PID into command.pid. If we fall back to the short-lived
+        // launcher PID too early, Linux CI can observe the task as already completed and cancel
+        // paths never reach the real process tree.
+        while ((System.currentTimeMillis() - start) < TRACKED_PID_WAIT_MS) {
             Integer commandPid = readCommandPid(task);
             if (commandPid != null && commandPid.intValue() > 0) {
                 return commandPid.intValue();
