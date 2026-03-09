@@ -6,28 +6,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ProperTee Java is a Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language. It uses ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** (replacing the JavaScript generator-based approach from [propertee-js](https://github.com/flatide/propertee-js)). Every statement visitor produces a Stepper object; a central scheduler round-robins between threads at statement boundaries.
 
+## Project Structure
+
+Multi-module Gradle project with three subprojects:
+
+| Module | Contents | Depends On |
+|---|---|---|
+| `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, task engine, ANTLR grammar | — |
+| `propertee-cli` | CLI runner (`Main.java`) and interactive REPL (`Repl.java`) | `propertee-core` |
+| `propertee-mockserver` | HTTP admin server for remote script execution, run management, task monitoring | `propertee-core` |
+
+Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Grammar at `propertee-core/grammar/ProperTee.g4`. Tests at `propertee-core/src/test/`.
+
 ## Build Commands
 
 ```bash
-# Full build (generate parser + compile + test + JAR)
+# Full build (generate parser + compile + test)
 ./gradlew clean build
 
 # Individual steps:
 ./gradlew generateGrammarSource   # regenerate parser/lexer/visitor from grammar
-./gradlew classes                 # compile Java sources
-./gradlew jar                     # create fat JAR (build/libs/propertee-java.jar)
-./gradlew test                    # run JUnit tests
+./gradlew classes                 # compile all Java sources
+./gradlew test                    # run JUnit tests (ScriptTest + TaskEngineTest)
 
-# Dual-target fat JARs:
+# CLI fat JARs:
 ./gradlew jar7                    # Java 7 fat JAR → build/libs/propertee-java-java7.jar
 ./gradlew jar8                    # Java 8 fat JAR → build/libs/propertee-java-java8.jar
 ./gradlew jarAll                  # Both JARs
 
-# Run a script via Gradle
-./gradlew run --args="sample/01_hello.pt"
+# Mock server:
+./gradlew runMockServer           # run mock server (pass -D flags for config)
+./gradlew mockServerZip           # build deployable zip → build/distributions/
+
+# Run a script via Gradle:
+./gradlew :propertee-cli:run --args="sample/01_hello.pt"
 ```
 
-**After any grammar change** (`grammar/ProperTee.g4`), run `./gradlew generateGrammarSource` to regenerate parser files.
+**After any grammar change** (`propertee-core/grammar/ProperTee.g4`), run `./gradlew generateGrammarSource` to regenerate parser files.
 
 **Build requirements:** JDK 8+ for building (JDK 8 required to produce Java 7 bytecode via `-source 1.7 -target 1.7`). Gradle (wrapper included). Target runtime is **Java 7 (1.7)**.
 
@@ -36,11 +51,11 @@ ProperTee Java is a Java implementation of the [ProperTee](https://github.com/fl
 `Main.java` runs `.pt` scripts from the command line. Falls back to an interactive REPL when no file is given.
 
 ```bash
-java -jar build/libs/propertee-java.jar script.pt                          # run a script
-java -jar build/libs/propertee-java.jar -p '{"width":100}' script.pt       # with built-in properties
-java -jar build/libs/propertee-java.jar -f props.json script.pt            # properties from file
-java -jar build/libs/propertee-java.jar --max-iterations 5000 script.pt    # custom loop limit
-java -jar build/libs/propertee-java.jar                                    # interactive REPL
+java -jar build/libs/propertee-java-java8.jar script.pt                    # run a script
+java -jar build/libs/propertee-java-java8.jar -p '{"width":100}' script.pt # with built-in properties
+java -jar build/libs/propertee-java-java8.jar -f props.json script.pt      # properties from file
+java -jar build/libs/propertee-java-java8.jar --max-iterations 5000 script.pt
+java -jar build/libs/propertee-java-java8.jar                              # interactive REPL
 ```
 
 REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are auto-detected via `do`/`if` vs `end` depth.
@@ -51,16 +66,21 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 # Run all tests via JUnit (integrated with build)
 ./gradlew test
 
-# Run a single test by name (parameterized test filter)
-./gradlew test --tests "com.propertee.tests.ScriptTest.testScript[09_functions]"
+# Run a single script test by name (parameterized test filter)
+./gradlew :propertee-core:test --tests "com.propertee.tests.ScriptTest.testScript[09_functions]"
+
+# Run only TaskEngine tests
+./gradlew :propertee-core:test --tests "com.propertee.tests.TaskEngineTest"
 
 # Run all tests via shell script (compares JAR output against .expected files)
 ./test_all.sh
 ```
 
-There are 79 test pairs in `src/test/resources/tests/` (numbered 01-80, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Test 34 (`builtin_properties`) requires properties passed via `-p`. Test 41 (`result_pattern`) registers external functions via `registerExternal`. Test 46 (`thread_error_result`) verifies that thread errors are captured as `{ok: false, value: "..."}` Result objects. Test 47 (`spawn_outside_multi`) verifies `thread` outside multi block is a runtime error. Test 48 (`has_key`) verifies `HAS_KEY()` built-in function. Tests 49-54 cover multi result collection, dynamic spawn, auto keys, duplicate key error, LEN on maps, and integer-as-string-key access on objects. Test 55 (`thread_status_field`) verifies the `status` field on thread results. Test 56 (`monitor_reads_result`) verifies that monitor clauses can read thread result status during execution. Test 57 (`dynamic_thread_keys`) verifies `$var`, `$::var`, and `$(expr)` dynamic key syntax in thread spawns. Test 58 verifies `#`-prefixed dynamic keys work. Test 59 verifies all spawn key types (dynamic `$var`/`$::var`, expression `$(expr)`, integer literal, string literal) with auto-coercion to string. Test 60 verifies duplicate dynamic key error. Test 61 (`duplicate_auto_key`) verifies that an explicit key colliding with an auto-generated `#N` key is a runtime error. Test 62 (`range_array`) verifies range array literal syntax `[start..end]` and `[start..end, step]`. Test 63 (`range_step_zero`) verifies that step=0 is a runtime error. Test 64 (`time_functions`) verifies `RANDOM()`, `MILTIME()`, `DATE()`, and `TIME()` built-in functions. Test 65 (`keys`) verifies `KEYS()` built-in function. Test 66 (`sort`) verifies `SORT()`, `SORT_DESC()`, `SORT_BY()`, `SORT_BY_DESC()`, and `REVERSE()` built-in functions. Test 67 (`sort_errors`) verifies sort error cases (mixed types, non-array, missing key). Test 68 (`cow_semantics`) verifies deep-copy value semantics: variable assignment isolation, nested mutation isolation, function parameter isolation, array isolation, object-in-array isolation, deep nesting isolation, and loop variable isolation. Test 69 (`thread_isolation`) verifies that thread global snapshots are deep copies (thread mutations don't affect caller's globals). Test 70 (`debug_statement`) verifies that `debug` is valid syntax and a no-op in normal execution. Test 71 (`async_external`) verifies `registerExternalAsync()` — basic async call, error handling, sequential async calls, async inside multi blocks with interleaving, and timeout. Test 72 (`shell`) verifies `SHELL()` and `SHELL_CTX()` built-in functions — one-off commands, piped commands, non-zero exit codes, context with cwd, context with env vars, invalid cwd error, and parallel SHELL in multi blocks. Test 73 (`keyword_ignore`) verifies `setHiddenKeywords()` — hidden keyword `"if"` produces runtime error. Test 74 (`function_ignore`) verifies `setIgnoredFunctions()` — ignored function `"SHELL"` produces runtime error. Tests 75-77 cover range edge cases (tiny float bound, tiny float step, integer overflow). Test 78 (`task_basic`) verifies `START_TASK()`, `TASK_STATUS()`, `WAIT_TASK()`, `TASK_RESULT()` lifecycle. Test 79 (`task_cancel`) verifies `CANCEL_TASK()` kills a running task and `WAIT_TASK()` returns killed status. Test 80 (`task_unique_ids`) verifies two `START_TASK()` calls with identical arguments get different task IDs.
+**Script tests:** 79 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-80, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; tests 72 uses `SHELL()`; tests 78-80 test `START_TASK`/`WAIT_TASK`/`CANCEL_TASK`.
 
-**Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
+**Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
+
+**TaskEngine tests:** `TaskEngineTest.java` tests process lifecycle, archiving, index management, and kill/cancel behavior. These spawn real shell processes.
 
 **Sample scripts:** `sample/01_hello.pt` through `sample/16_comments.pt` cover all language features.
 
@@ -101,20 +121,29 @@ interface Stepper {
 
 ### Package Structure
 
+**Core packages** (in `propertee-core`):
+
 | Package | Role |
 |---|---|
-| `com.propertee.cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
 | `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1730 lines), built-in functions, scope management, function definitions |
 | `com.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
 | `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
 | `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
-| `com.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `grammar/ProperTee.g4`) |
+| `com.propertee.task` | TaskEngine for detached process execution, TaskStatus enum, Task/TaskInfo/TaskObservation models |
+| `com.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
+
+**Application packages:**
+
+| Package | Module | Role |
+|---|---|---|
+| `com.propertee.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
+| `com.propertee.mockserver` | `propertee-mockserver` | HTTP admin server, run management, script execution service |
 
 ### Key Files
 
 | File | Role |
 |---|---|
-| `grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn keys reuse the `access` rule (same as property access): `thread key:`, `thread "key":`, `thread 42:`, `thread $var:`, `thread $::var:`, `thread $(expr):`, `thread :` (unnamed). `arrayLiteral` has two alternatives: `RangeArray` (`[start..end]` or `[start..end, step]`) and `ListArray` (`[1, 2, 3]`). Object keys must be quoted strings or integers — bare identifiers are not allowed (`{"name": "Alice"}`, not `{name: "Alice"}`). |
+| `propertee-core/grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn keys reuse the `access` rule (same as property access): `thread key:`, `thread "key":`, `thread 42:`, `thread $var:`, `thread $::var:`, `thread $(expr):`, `thread :` (unnamed). `arrayLiteral` has two alternatives: `RangeArray` (`[start..end]` or `[start..end, step]`) and `ListArray` (`[1, 2, 3]`). Object keys must be quoted strings or integers — bare identifiers are not allowed (`{"name": "Alice"}`, not `{name: "Alice"}`). |
 | `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `visitSpawnKeyStmt` resolves key from `access` context (StaticAccess, StringKeyAccess, ArrayAccess, VarEvalAccess, EvalAccess). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Integer keys on objects become string keys in `getProperty()`. `resolveAndValidateDynamicKey()` auto-coerces dynamic keys to string via `TO_STRING()` (empty treated as unnamed, no duplicates). |
 | `BuiltinFunctions.java` | 41 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, KEYS, SORT, SORT_DESC, SORT_BY, SORT_BY_DESC, REVERSE, RANDOM, MILTIME, DATE, TIME, SHELL, SHELL_CTX, START_TASK, TASK_STATUS, TASK_RESULT, WAIT_TASK, CANCEL_TASK, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for sync I/O, `registerExternalAsync()` for async I/O (blocking calls on thread pool). `SHELL` and task engine functions use `TaskEngine` for detached process execution. `SHELL_CTX(cwd[, env])` creates a context config (sync via `registerExternal`). `SHELL(cmd)` or `SHELL(ctx, cmd)` executes shell commands (async via `registerExternalAsync`). `SHELL` auto-unwraps Result from `SHELL_CTX` — pass the Result directly, not `.value`. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
@@ -253,6 +282,78 @@ BLOCKED → READY                    (async future completed or timed out)
 ### Flow Control
 
 `BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: loops catch break/continue, function call steppers catch return, statement-level steppers (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper) catch `AsyncPendingException` and return `AWAIT_ASYNC` command for retry.
+
+## Mock Server Subsystem
+
+The mock server (`propertee-mockserver` module) provides an HTTP service for remote ProperTee script execution, designed for HPC environments. Evolution plan documented in `demo/mockserver/PLAN.md`.
+
+### Mock Server Architecture
+
+```
+HTTP Request → MockAdminServer
+                  ├── ApiHandler (/api/*) — JSON API, Bearer token auth
+                  └── AdminHandler (/admin/*) → AdminPageRenderer — HTML UI
+                            ↓
+                       RunManager (coordinator)
+                  ┌────────┴────────┐
+            ScriptExecutor    RunRegistry ←→ RunStore (disk)
+                  ↓                              ↓
+            ProperTeeInterpreter           runs/index.json
+            + Scheduler                    runs/{runId}.json
+                  ↓
+            TaskEngine ←→ tasks/index.json
+                              tasks/task-{id}/
+```
+
+### Key Mock Server Classes
+
+| Class | Role |
+|---|---|
+| `MockAdminServer` | HTTP server (com.sun.net.httpserver). API routes (`/api/runs`, `/api/tasks`) and admin UI routes. Bearer token auth on API via `config.apiToken`. |
+| `RunManager` | Thin coordinator: submits runs to thread pool, delegates to ScriptExecutor and RunRegistry. Manages TaskEngine lifecycle. |
+| `ScriptExecutor` | Stateless script executor: parse → interpret → schedule → collect results. Returns `ExecutionResult` with `hasExplicitReturn` flag and `resultData`. |
+| `RunRegistry` | In-memory run state cache (ConcurrentHashMap) backed by RunStore. Handles run lifecycle (QUEUED → RUNNING → COMPLETED/FAILED), log ring buffers (200 lines), archiving (24h retention → trim logs → 7d purge). On server restart, non-terminal runs marked `SERVER_RESTARTED`. |
+| `RunStore` | File-based persistence for RunInfo. Index-based pagination (`runs/index.json`) with atomic write via tmp+move. All public methods `synchronized`. |
+| `AdminPageRenderer` | HTML page generation for admin UI (extracted from MockAdminServer). |
+| `MockServerConfig` | Configuration via system properties (`propertee.mock.*`): bind address, port, scriptsRoot, dataDir, maxConcurrentRuns, apiToken. |
+
+### TaskEngine (`com.propertee.task`)
+
+Manages detached shell processes. Used by both SHELL()/START_TASK() builtins and the mock server.
+
+| Class | Role |
+|---|---|
+| `TaskEngine` | Launch processes via ProcessBuilder with `setsid`/`nohup`, monitor via `ps`, kill via signal escalation. Lock-free per-task execution (AtomicInteger IDs). Index-based queries (`tasks/index.json`). Two-phase archiving: retain 24h → archive (tail logs) → purge 7d. Exponential backoff polling (50ms→1000ms). |
+| `TaskStatus` | Enum: STARTING, RUNNING, COMPLETED, FAILED, KILLED, DETACHED, LOST. `@SerializedName` for lowercase JSON compat. `isTransient()` for states that need recheck. |
+| `Task` | Persistent model: command, pid, pgid, status, exitCode, timeoutMs, hostInstanceId, archived flag, stdoutTail/stderrTail (archived only). |
+| `TaskInfo` | DTO with computed fields: elapsedMs, timeoutExceeded, healthHints. |
+| `TaskObservation` | Snapshot from `observe()`: alive, elapsed, output timestamps, health hints (TIMEOUT_EXCEEDED, PROCESS_NOT_FOUND, IDENTITY_UNVERIFIED). |
+
+### Mock Server API
+
+```bash
+# Run mock server
+./gradlew runMockServer \
+  -Dpropertee.mock.scriptsRoot=./sample \
+  -Dpropertee.mock.dataDir=/tmp/propertee-data \
+  -Dpropertee.mock.apiToken=secret
+
+# API endpoints (Bearer token required if apiToken set)
+POST /api/runs                     # submit script execution
+GET  /api/runs?status=RUNNING      # list runs (status, offset, limit)
+GET  /api/runs/{runId}             # run detail (includes threads, tasks)
+GET  /api/tasks?runId=xxx          # list tasks (runId, status, offset, limit)
+POST /api/tasks/{taskId}/kill      # kill task
+```
+
+### Structured Results Contract
+
+Scripts can return results via two mechanisms:
+1. **Explicit return** — `return expr` in script → `hasExplicitReturn=true`, `resultData=returnValue`
+2. **`result` variable fallback** — if no return, checks `variables.get("result")` → `hasExplicitReturn=false`, `resultData=resultVar`
+3. **Neither** — `resultData=null`
+
+`RootStepper` (public inner class of `ProperTeeInterpreter`) tracks `hasExplicitReturn` via `ReturnException` catch.
 
 ## Language Quick Reference
 
@@ -421,6 +522,7 @@ visitor.setIgnoredFunctions(ignored);
 - Division always produces `Double`
 - Semicolons are optional statement separators (treated as whitespace by the lexer)
 - **Syntax highlighting** — ProperTee repo has Vim (`editors/vim/syntax/propertee.vim`) and VS Code (`editors/vscode/syntaxes/propertee.tmLanguage.json`) syntax files. The playground (`propertee-js/docs/index.html`) has its own regex-based syntax highlighting via `highlightSyntax()` — update the `builtins` and `keywords` strings there when adding new built-in functions or keywords. Update all three locations when adding keywords or built-in functions.
+- **Index files** — both RunStore and TaskEngine use `index.json` with atomic write (tmp+move) for filtered pagination. TaskEngine uses `synchronized(indexLock)` for its index; RunStore uses `synchronized(this)` on all public methods.
 
 ## Dependencies
 
