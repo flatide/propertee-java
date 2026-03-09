@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TaskEngine {
     private static final long WAIT_POLL_INITIAL_MS = 50L;
     private static final long WAIT_POLL_MAX_MS = 1000L;
-    private static final long TRACKED_PID_WAIT_MS = 3000L;
+    private static final long TRACKED_PID_WAIT_MS = 500L;
     private static final long DEFAULT_RETENTION_MS = 24L * 60L * 60L * 1000L;
     private static final long DEFAULT_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
 
@@ -96,6 +96,7 @@ public class TaskEngine {
         task.hostInstanceId = hostInstanceId;
         task.bindFiles(taskDir);
         writeCommandFiles(task, request);
+        writeRunnerFile(task);
 
         int launcherPid = launchDetached(task, request);
         task.pid = resolveTrackedPid(task, launcherPid);
@@ -593,7 +594,6 @@ public class TaskEngine {
     private void writeCommandFiles(Task task, TaskRequest request) {
         StringBuilder command = new StringBuilder();
         command.append("#!/bin/sh\n");
-        command.append("printf '%s\\n' \"$$\" > ").append(shellQuote(task.commandPidFile.getAbsolutePath())).append("\n");
         if (request.mergeErrorToStdout) {
             command.append(": > ").append(shellQuote(task.stderrFile.getAbsolutePath())).append("\n");
         }
@@ -605,21 +605,31 @@ public class TaskEngine {
         writeFile(task.commandFile, command.toString());
     }
 
+    private void writeRunnerFile(Task task) {
+        StringBuilder runner = new StringBuilder();
+        runner.append("#!/bin/sh\n");
+        if (setsidAvailable) {
+            runner.append("exec setsid /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath())).append("\n");
+        } else {
+            runner.append("exec /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath())).append("\n");
+        }
+        writeFile(task.runnerFile, runner.toString());
+    }
+
     private int launchDetached(Task task, TaskRequest request) {
         Process process = null;
         try {
             StringBuilder wrapped = new StringBuilder();
-            if (setsidAvailable) {
-                wrapped.append("setsid ");
-            }
-            wrapped.append("nohup /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath()));
+            wrapped.append("nohup /bin/sh ").append(shellQuote(task.runnerFile.getAbsolutePath()));
             wrapped.append(" > ").append(shellQuote(task.stdoutFile.getAbsolutePath()));
             if (request.mergeErrorToStdout) {
                 wrapped.append(" 2>&1");
             } else {
                 wrapped.append(" 2> ").append(shellQuote(task.stderrFile.getAbsolutePath()));
             }
-            wrapped.append(" & echo $!");
+            wrapped.append(" & child=$!; ");
+            wrapped.append("printf '%s\\n' \"$child\" > ").append(shellQuote(task.commandPidFile.getAbsolutePath()));
+            wrapped.append("; echo $child");
             ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", wrapped.toString());
             if (request.cwd != null && request.cwd.length() > 0) {
                 pb.directory(new File(request.cwd));
@@ -768,10 +778,6 @@ public class TaskEngine {
 
     private int resolveTrackedPid(Task task, int launcherPid) {
         long start = System.currentTimeMillis();
-        // Detached launch returns quickly, but the inner shell may need a short grace period
-        // before it writes its stable PID into command.pid. If we fall back to the short-lived
-        // launcher PID too early, Linux CI can observe the task as already completed and cancel
-        // paths never reach the real process tree.
         while ((System.currentTimeMillis() - start) < TRACKED_PID_WAIT_MS) {
             Integer commandPid = readCommandPid(task);
             if (commandPid != null && commandPid.intValue() > 0) {
@@ -790,9 +796,7 @@ public class TaskEngine {
             return commandPid.intValue();
         }
 
-        throw new RuntimeException(
-            "Failed to resolve detached task pid after launch (launcherPid=" + launcherPid + ")"
-        );
+        return launcherPid;
     }
 
     private Integer readCommandPid(Task task) {
