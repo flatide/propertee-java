@@ -784,7 +784,15 @@ public class TaskEngine {
                 break;
             }
         }
-        return launcherPid;
+
+        Integer commandPid = readCommandPid(task);
+        if (commandPid != null && commandPid.intValue() > 0) {
+            return commandPid.intValue();
+        }
+
+        throw new RuntimeException(
+            "Failed to resolve detached task pid after launch (launcherPid=" + launcherPid + ")"
+        );
     }
 
     private Integer readCommandPid(Task task) {
