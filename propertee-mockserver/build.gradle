@@ -1,0 +1,79 @@
+plugins {
+    id 'application'
+}
+
+evaluationDependsOn(':propertee-core')
+
+dependencies {
+    implementation project(':propertee-core')
+    implementation 'com.google.code.gson:gson:2.8.9'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+application {
+    mainClass = 'com.propertee.mockserver.MockServerMain'
+}
+
+run {
+    standardInput = System.in
+    systemProperties System.properties.findAll { key, value ->
+        key.startsWith('propertee.mock.') || key.startsWith('propertee.task.')
+    }
+}
+
+def externalRuntime = {
+    configurations.runtimeClasspath.filter { !it.name.startsWith('propertee-core') }
+}
+
+task compileJava7(type: JavaCompile) {
+    dependsOn project(':propertee-core').tasks.named('compileJava7')
+    source = sourceSets.main.java
+    classpath = files(project(':propertee-core').tasks.named('compileJava7').get().destinationDirectory) + externalRuntime()
+    destinationDirectory = file("${buildDir}/classes/java7")
+    sourceCompatibility = '1.7'
+    targetCompatibility = '1.7'
+    options.encoding = 'UTF-8'
+}
+
+task mockServerJar(type: Jar) {
+    dependsOn compileJava7
+    archiveBaseName = 'propertee-mockserver'
+    manifest {
+        attributes 'Main-Class': 'com.propertee.mockserver.MockServerMain'
+    }
+    from compileJava7.destinationDirectory
+    from project(':propertee-core').tasks.named('compileJava7').get().destinationDirectory
+    from {
+        externalRuntime().collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+task mockServerDist(type: Copy) {
+    dependsOn mockServerJar
+    into "${buildDir}/mockserver-dist"
+    from(mockServerJar.archiveFile) {
+        into 'lib'
+    }
+    from('deploy/mockserver/mockserver.properties') {
+        into 'conf'
+    }
+    from('deploy/mockserver/run-mockserver.sh') {
+        into 'bin'
+    }
+    from('deploy/mockserver/README.md') {
+        into '.'
+    }
+    description = 'Build a deployable ProperTee mock server directory'
+    group = 'distribution'
+}
+
+task mockServerZip(type: Zip) {
+    dependsOn mockServerDist
+    archiveBaseName = 'propertee-mockserver'
+    archiveClassifier = 'dist'
+    destinationDirectory = file("${buildDir}/distributions")
+    from("${buildDir}/mockserver-dist")
+    description = 'Build a deployable ProperTee mock server zip archive'
+    group = 'distribution'
+}

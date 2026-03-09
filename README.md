@@ -32,6 +32,22 @@ java -jar build/libs/propertee-java-java8.jar
 ./test_all.sh all   # Run integration tests against both JARs
 ```
 
+## Mock Server Deployment
+
+Build a deployable mock server bundle:
+
+```bash
+./gradlew mockServerZip
+```
+
+Output:
+
+```text
+build/distributions/propertee-mockserver-dist.zip
+```
+
+Deployment bundle contents and startup instructions are documented in [`propertee-mockserver/deploy/mockserver/README.md`](propertee-mockserver/deploy/mockserver/README.md).
+
 ## How the Stepper Pattern Works
 
 The `Stepper` interface replaces JavaScript's `function*`/`yield` pattern:

@@ -1,0 +1,48 @@
+plugins {
+    id 'java-library'
+    id 'antlr'
+}
+
+dependencies {
+    antlr 'org.antlr:antlr4:4.9.3'
+    api 'org.antlr:antlr4-runtime:4.9.3'
+    implementation 'com.google.code.gson:gson:2.8.9'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+sourceSets {
+    main {
+        antlr {
+            srcDirs = ["${projectDir}/grammar"]
+        }
+        java {
+            srcDirs = ["src/main/java", "${buildDir}/generated-src/antlr/main"]
+        }
+    }
+}
+
+generateGrammarSource {
+    arguments += ['-visitor', '-no-listener', '-package', 'com.propertee.parser']
+    outputDirectory = file("${project.buildDir}/generated-src/antlr/main")
+}
+
+compileJava.dependsOn generateGrammarSource
+
+task compileJava7(type: JavaCompile) {
+    dependsOn generateGrammarSource
+    source = sourceSets.main.java
+    classpath = configurations.runtimeClasspath
+    destinationDirectory = file("${buildDir}/classes/java7")
+    sourceCompatibility = '1.7'
+    targetCompatibility = '1.7'
+    options.encoding = 'UTF-8'
+}
+
+task runAsyncDemo(type: JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.propertee.tests.AsyncDemo'
+    standardInput = System.in
+    description = 'Run async external functions demo'
+    group = 'application'
+}
