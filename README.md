@@ -49,6 +49,23 @@ build/distributions/propertee-teebox-dist.zip
 Deployment bundle contents and startup instructions are documented in [`propertee-teebox/deploy/teebox/README.md`](propertee-teebox/deploy/teebox/README.md).
 Module overview and operator-facing notes are documented in [`propertee-teebox/README.md`](propertee-teebox/README.md).
 
+## GitHub Releases
+
+GitHub Releases publish downloadable build artifacts when a tag like `v0.3.1` is pushed.
+
+Published assets:
+
+- `propertee-java-java7.jar`
+- `propertee-java-java8.jar`
+- `propertee-teebox-dist.zip`
+
+To publish a release:
+
+```bash
+git tag v0.3.1
+git push origin v0.3.1
+```
+
 ## How the Stepper Pattern Works
 
 The `Stepper` interface replaces JavaScript's `function*`/`yield` pattern:

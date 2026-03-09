@@ -34,6 +34,15 @@ TeeBox is the ProperTee execution service module. It exposes an HTTP admin UI an
 
 Open `http://127.0.0.1:18080/admin`.
 
+## GitHub Download
+
+`propertee-teebox-dist.zip` is published on GitHub Releases when a repository tag such as `v0.3.1` is pushed.
+
+```bash
+git tag v0.3.1
+git push origin v0.3.1
+```
+
 ## Configuration
 
 Primary settings use the `propertee.teebox.*` prefix:
