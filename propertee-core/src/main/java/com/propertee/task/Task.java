@@ -33,7 +33,6 @@ public class Task {
     public transient File exitCodeFile;
     public transient File commandPidFile;
     public transient File commandFile;
-    public transient File runnerFile;
 
     public void bindFiles(File taskDirectory) {
         this.taskDir = taskDirectory;
@@ -44,6 +43,5 @@ public class Task {
         this.exitCodeFile = new File(taskDirectory, "exit.code");
         this.commandPidFile = new File(taskDirectory, "command.pid");
         this.commandFile = new File(taskDirectory, "command.sh");
-        this.runnerFile = new File(taskDirectory, "runner.sh");
     }
 }

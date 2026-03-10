@@ -44,7 +44,6 @@ public class TaskEngine {
     private final AtomicInteger taskCounter = new AtomicInteger(0);
     private final String hostInstanceId;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-    private final boolean setsidAvailable;
     private final String taskIdPrefix;
     private final Set<String> ownedTaskIds = Collections.synchronizedSet(new HashSet<String>());
     private final Object indexLock = new Object();
@@ -60,7 +59,6 @@ public class TaskEngine {
         if (!tasksDir.exists()) {
             tasksDir.mkdirs();
         }
-        this.setsidAvailable = isCommandAvailable("setsid");
         this.taskIdPrefix = sanitizeTaskIdPrefix(hostInstanceId);
         this.indexFile = new File(tasksDir, "index.json");
         this.indexTmpFile = new File(tasksDir, "index.json.tmp");
@@ -97,8 +95,6 @@ public class TaskEngine {
         task.hostInstanceId = hostInstanceId;
         task.bindFiles(taskDir);
         writeCommandFiles(task, request);
-        writeRunnerFile(task);
-
         int launcherPid = launchDetached(task, request);
         task.pid = resolveTrackedPid(task, launcherPid);
         task.pidStartTime = getProcessStartTime(task.pid);
@@ -572,7 +568,6 @@ public class TaskEngine {
         deleteQuietly(task.exitCodeFile);
         deleteQuietly(task.commandPidFile);
         deleteQuietly(task.commandFile);
-        deleteQuietly(task.runnerFile);
         updateTaskIndex(task);
     }
 
@@ -588,7 +583,6 @@ public class TaskEngine {
         deleteQuietly(task.exitCodeFile);
         deleteQuietly(task.commandPidFile);
         deleteQuietly(task.commandFile);
-        deleteQuietly(task.runnerFile);
         deleteQuietly(task.taskDir);
     }
 
@@ -606,22 +600,11 @@ public class TaskEngine {
         writeFile(task.commandFile, command.toString());
     }
 
-    private void writeRunnerFile(Task task) {
-        StringBuilder runner = new StringBuilder();
-        runner.append("#!/bin/sh\n");
-        if (setsidAvailable) {
-            runner.append("exec setsid /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath())).append("\n");
-        } else {
-            runner.append("exec /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath())).append("\n");
-        }
-        writeFile(task.runnerFile, runner.toString());
-    }
-
     private int launchDetached(Task task, TaskRequest request) {
         Process process = null;
         try {
             StringBuilder wrapped = new StringBuilder();
-            wrapped.append("nohup /bin/sh ").append(shellQuote(task.runnerFile.getAbsolutePath()));
+            wrapped.append("nohup /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath()));
             wrapped.append(" > ").append(shellQuote(task.stdoutFile.getAbsolutePath()));
             if (request.mergeErrorToStdout) {
                 wrapped.append(" 2>&1");
@@ -1142,23 +1125,6 @@ public class TaskEngine {
             return Long.parseLong(raw.trim());
         } catch (NumberFormatException e) {
             return defaultValue;
-        }
-    }
-
-    private boolean isCommandAvailable(String command) {
-        Process process = null;
-        try {
-            process = new ProcessBuilder("/bin/sh", "-c", "command -v " + command).start();
-            String output = readStream(process.getInputStream()).trim();
-            return process.waitFor() == 0 && output.length() > 0;
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (process != null) {
-                closeQuietly(process.getInputStream());
-                closeQuietly(process.getErrorStream());
-                closeQuietly(process.getOutputStream());
-            }
         }
     }
 
