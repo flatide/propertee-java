@@ -42,7 +42,7 @@ public class AdminPageRenderer {
 
         sb.append("<div class='card'>");
         sb.append("<div class='card-header'><h2>Runs</h2>");
-        sb.append("<div class='card-actions'><a href='/api/runs' class='link-subtle'>API</a> <a href='/api/tasks' class='link-subtle'>Tasks API</a></div></div>");
+        sb.append("<div class='card-actions'><a href='/api/admin/runs' class='link-subtle'>Runs API</a> <a href='/api/admin/tasks' class='link-subtle'>Tasks API</a></div></div>");
         if (runs.isEmpty()) {
             sb.append("<p class='empty'>No runs yet</p>");
         } else {
@@ -97,7 +97,7 @@ public class AdminPageRenderer {
         sb.append("<span class='nav-sep'>/</span>");
         sb.append("<span>Run ").append(escape(shortId(runId))).append("</span>");
         sb.append("<span class='nav-sep'>|</span>");
-        sb.append("<a href='/api/runs/").append(urlPath(runId)).append("' class='link-subtle'>JSON</a>");
+        sb.append("<a href='/api/admin/runs/").append(urlPath(runId)).append("' class='link-subtle'>JSON</a>");
         sb.append("</div>");
 
         sb.append("<div class='card'>");
@@ -163,7 +163,7 @@ public class AdminPageRenderer {
         sb.append("<span class='nav-sep'>/</span>");
         sb.append("<span>Task ").append(escape(shortId(taskId))).append("</span>");
         sb.append("<span class='nav-sep'>|</span>");
-        sb.append("<a href='/api/tasks/").append(urlPath(taskId)).append("' class='link-subtle'>JSON</a>");
+        sb.append("<a href='/api/admin/tasks/").append(urlPath(taskId)).append("' class='link-subtle'>JSON</a>");
         sb.append("</div>");
 
         sb.append("<div class='card'>");

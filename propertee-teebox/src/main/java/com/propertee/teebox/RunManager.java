@@ -30,6 +30,7 @@ public class RunManager {
     private final File scriptsRoot;
     private final File dataDir;
     private final RunRegistry runRegistry;
+    private final ScriptRegistry scriptRegistry;
     private final TaskEngine taskEngine;
     private final ThreadPoolExecutor runExecutor;
     private final ScriptExecutor scriptExecutor;
@@ -47,6 +48,7 @@ public class RunManager {
         long runRetentionMs = parseDurationProperty("runRetentionMs", DEFAULT_RUN_RETENTION_MS);
         long runArchiveRetentionMs = parseDurationProperty("runArchiveRetentionMs", DEFAULT_RUN_ARCHIVE_RETENTION_MS);
         this.runRegistry = new RunRegistry(this.dataDir, MAX_LOG_LINES, ARCHIVED_STDOUT_LINES, ARCHIVED_STDERR_LINES, runRetentionMs, runArchiveRetentionMs);
+        this.scriptRegistry = new ScriptRegistry(this.dataDir);
         this.taskEngine = new TaskEngine(this.dataDir.getAbsolutePath(), createHostInstanceId());
         this.taskEngine.init();
         this.taskEngine.archiveExpiredTasks();
@@ -56,11 +58,13 @@ public class RunManager {
     }
 
     public RunInfo submit(final RunRequest request) {
-        final File scriptFile = resolveScriptPath(request.scriptPath);
+        final ResolvedRunTarget target = resolveRunTarget(request);
         final RunInfo run = new RunInfo();
         run.runId = createRunId();
-        run.scriptPath = request.scriptPath;
-        run.scriptAbsolutePath = scriptFile.getAbsolutePath();
+        run.scriptPath = target.displayPath;
+        run.scriptId = target.scriptId;
+        run.version = target.version;
+        run.scriptAbsolutePath = target.scriptFile.getAbsolutePath();
         run.status = RunStatus.QUEUED;
         run.createdAt = System.currentTimeMillis();
         run.maxIterations = request.maxIterations > 0 ? request.maxIterations : 1000;
@@ -71,11 +75,38 @@ public class RunManager {
         Future<?> future = runExecutor.submit(new Runnable() {
             @Override
             public void run() {
-                executeRun(run, scriptFile);
+                executeRun(run, target.scriptFile);
             }
         });
         activeRuns.put(run.runId, future);
         return run.copy();
+    }
+
+    public List<ScriptInfo> listScripts() {
+        List<ScriptInfo> scripts = scriptRegistry.listScripts();
+        List<ScriptInfo> result = new ArrayList<ScriptInfo>();
+        for (ScriptInfo info : scripts) {
+            result.add(info.copy());
+        }
+        return result;
+    }
+
+    public ScriptInfo getScript(String scriptId) {
+        ScriptInfo info = scriptRegistry.loadScript(scriptId);
+        return info != null ? info.copy() : null;
+    }
+
+    public ScriptInfo registerScriptVersion(String scriptId,
+                                            String version,
+                                            String content,
+                                            String description,
+                                            List<String> labels,
+                                            boolean activate) {
+        return scriptRegistry.registerVersion(scriptId, version, content, description, labels, activate);
+    }
+
+    public ScriptInfo activateScriptVersion(String scriptId, String version) {
+        return scriptRegistry.activateVersion(scriptId, version);
     }
 
     public List<RunInfo> listRuns() {
@@ -242,6 +273,29 @@ public class RunManager {
         }
     }
 
+    private ResolvedRunTarget resolveRunTarget(RunRequest request) {
+        String scriptId = trimToNull(request != null ? request.scriptId : null);
+        String scriptPath = trimToNull(request != null ? request.scriptPath : null);
+        if (scriptId != null && scriptPath != null) {
+            throw new IllegalArgumentException("Provide either scriptPath or scriptId/version, not both");
+        }
+        if (scriptId != null) {
+            ScriptRegistry.ResolvedScript resolved = scriptRegistry.resolve(scriptId, trimToNull(request.version));
+            ResolvedRunTarget target = new ResolvedRunTarget();
+            target.scriptFile = resolved.file;
+            target.displayPath = resolved.displayPath;
+            target.scriptId = resolved.scriptId;
+            target.version = resolved.version;
+            return target;
+        }
+
+        File resolvedPath = resolveScriptPath(scriptPath);
+        ResolvedRunTarget target = new ResolvedRunTarget();
+        target.scriptFile = resolvedPath;
+        target.displayPath = scriptPath;
+        return target;
+    }
+
     private File resolveScriptPath(String scriptPath) {
         if (scriptPath == null || scriptPath.trim().length() == 0) {
             throw new IllegalArgumentException("scriptPath is required");
@@ -283,6 +337,14 @@ public class RunManager {
     private static String createHostInstanceId() {
         return "teebox-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ENGLISH).format(new Date()) +
             "-" + Integer.toHexString((int) (System.nanoTime() & 0xffff));
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() == 0 ? null : trimmed;
     }
 
     private void maintainRuns() {
@@ -339,5 +401,12 @@ public class RunManager {
 
     private void maintainTasks() {
         taskEngine.archiveExpiredTasks();
+    }
+
+    private static class ResolvedRunTarget {
+        File scriptFile;
+        String displayPath;
+        String scriptId;
+        String version;
     }
 }

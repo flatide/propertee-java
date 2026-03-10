@@ -10,6 +10,8 @@ import java.util.Map;
 public class RunInfo {
     public String runId;
     public String scriptPath;
+    public String scriptId;
+    public String version;
     public String scriptAbsolutePath;
     public RunStatus status;
     public boolean archived;
@@ -31,6 +33,8 @@ public class RunInfo {
         RunInfo copy = new RunInfo();
         copy.runId = runId;
         copy.scriptPath = scriptPath;
+        copy.scriptId = scriptId;
+        copy.version = version;
         copy.scriptAbsolutePath = scriptAbsolutePath;
         copy.status = status;
         copy.archived = archived;

@@ -13,6 +13,9 @@ public class TeeBoxConfig {
     public File dataDir;
     public int maxConcurrentRuns = 4;
     public String apiToken;
+    public String clientApiToken;
+    public String publisherApiToken;
+    public String adminApiToken;
 
     public static TeeBoxConfig fromArgs(String[] args) {
         File configFile = resolveConfigFile(args);
@@ -50,9 +53,33 @@ public class TeeBoxConfig {
         if (apiToken != null && apiToken.trim().length() > 0) {
             config.apiToken = apiToken.trim();
         }
+        String clientApiToken = getSetting("clientApiToken", fileProps);
+        if (clientApiToken != null && clientApiToken.trim().length() > 0) {
+            config.clientApiToken = clientApiToken.trim();
+        }
+        String publisherApiToken = getSetting("publisherApiToken", fileProps);
+        if (publisherApiToken != null && publisherApiToken.trim().length() > 0) {
+            config.publisherApiToken = publisherApiToken.trim();
+        }
+        String adminApiToken = getSetting("adminApiToken", fileProps);
+        if (adminApiToken != null && adminApiToken.trim().length() > 0) {
+            config.adminApiToken = adminApiToken.trim();
+        }
         config.scriptsRoot = canonicalFile(new File(scriptsRoot.trim()));
         config.dataDir = canonicalFile(new File(dataDir.trim()));
         return config;
+    }
+
+    public String tokenForClientApi() {
+        return firstNonBlank(clientApiToken, apiToken);
+    }
+
+    public String tokenForPublisherApi() {
+        return firstNonBlank(publisherApiToken, apiToken);
+    }
+
+    public String tokenForAdminApi() {
+        return firstNonBlank(adminApiToken, apiToken);
     }
 
     private static String getSetting(String suffix, Properties fileProps) {
@@ -122,5 +149,15 @@ public class TeeBoxConfig {
         } catch (IOException e) {
             throw new IllegalArgumentException("Failed to resolve path: " + file.getPath(), e);
         }
+    }
+
+    private static String firstNonBlank(String primary, String fallback) {
+        if (primary != null && primary.trim().length() > 0) {
+            return primary.trim();
+        }
+        if (fallback != null && fallback.trim().length() > 0) {
+            return fallback.trim();
+        }
+        return null;
     }
 }

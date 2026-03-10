@@ -2,6 +2,7 @@ package com.propertee.tests;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+import com.propertee.teebox.TeeBoxClient;
 import com.propertee.teebox.TeeBoxServer;
 import com.propertee.teebox.TeeBoxConfig;
 
@@ -20,6 +21,7 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -49,7 +51,7 @@ public class TeeBoxServerTest {
             Map<String, Object> submit = new LinkedHashMap<String, Object>();
             submit.put("scriptPath", "multi_tasks.pt");
             submit.put("props", new LinkedHashMap<String, Object>());
-            Map<String, Object> created = postJson(testServer.baseUrl + "/api/runs", submit, 202);
+            Map<String, Object> created = postJson(testServer.baseUrl + "/api/client/runs", submit, 202);
             String runId = (String) created.get("runId");
             Assert.assertNotNull(runId);
 
@@ -85,7 +87,7 @@ public class TeeBoxServerTest {
             Map<String, Object> submit = new LinkedHashMap<String, Object>();
             submit.put("scriptPath", "kill_task.pt");
             submit.put("props", new LinkedHashMap<String, Object>());
-            Map<String, Object> created = postJson(testServer.baseUrl + "/api/runs", submit, 202);
+            Map<String, Object> created = postJson(testServer.baseUrl + "/api/client/runs", submit, 202);
             String runId = (String) created.get("runId");
             Assert.assertNotNull(runId);
 
@@ -94,7 +96,7 @@ public class TeeBoxServerTest {
             List<Map<String, Object>> tasks = (List<Map<String, Object>>) detail.get("tasks");
             String taskId = (String) tasks.get(0).get("taskId");
 
-            Map<String, Object> killResult = postJson(testServer.baseUrl + "/api/tasks/" + taskId + "/kill", new LinkedHashMap<String, Object>(), 200);
+            Map<String, Object> killResult = postJson(testServer.baseUrl + "/api/admin/tasks/" + taskId + "/kill", new LinkedHashMap<String, Object>(), 200);
             Assert.assertEquals(Boolean.TRUE, killResult.get("killed"));
 
             Map<String, Object> taskDetail = waitForTaskStatus(testServer.baseUrl, taskId, "killed", 8000L);
@@ -119,12 +121,12 @@ public class TeeBoxServerTest {
             Map<String, Object> submitReturn = new LinkedHashMap<String, Object>();
             submitReturn.put("scriptPath", "return_result.pt");
             submitReturn.put("props", new LinkedHashMap<String, Object>());
-            String returnRunId = (String) postJson(testServer.baseUrl + "/api/runs", submitReturn, 202).get("runId");
+            String returnRunId = (String) postJson(testServer.baseUrl + "/api/client/runs", submitReturn, 202).get("runId");
 
             Map<String, Object> submitVariable = new LinkedHashMap<String, Object>();
             submitVariable.put("scriptPath", "variable_result.pt");
             submitVariable.put("props", new LinkedHashMap<String, Object>());
-            String variableRunId = (String) postJson(testServer.baseUrl + "/api/runs", submitVariable, 202).get("runId");
+            String variableRunId = (String) postJson(testServer.baseUrl + "/api/client/runs", submitVariable, 202).get("runId");
 
             Map<String, Object> returnDetail = waitForRunStatus(testServer.baseUrl, returnRunId, "COMPLETED", 8000L);
             @SuppressWarnings("unchecked")
@@ -155,15 +157,15 @@ public class TeeBoxServerTest {
             writeScript(testServer.scriptsRoot, "auth_result.pt",
                 "result = {\"ok\": true}\n");
 
-            assertStatus(testServer.baseUrl + "/api/runs", "GET", null, null, 401);
+            assertStatus(testServer.baseUrl + "/api/client/runs", "GET", null, null, 401);
 
             Map<String, Object> submit = new LinkedHashMap<String, Object>();
             submit.put("scriptPath", "auth_result.pt");
             submit.put("props", new LinkedHashMap<String, Object>());
 
-            assertStatus(testServer.baseUrl + "/api/runs", "POST", submit, null, 401);
+            assertStatus(testServer.baseUrl + "/api/client/runs", "POST", submit, null, 401);
 
-            Map<String, Object> created = postJson(testServer.baseUrl + "/api/runs", submit, 202, "secret-token");
+            Map<String, Object> created = postJson(testServer.baseUrl + "/api/client/runs", submit, 202, "secret-token");
             String runId = (String) created.get("runId");
             Assert.assertNotNull(runId);
 
@@ -171,6 +173,146 @@ public class TeeBoxServerTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> run = (Map<String, Object>) detail.get("run");
             Assert.assertEquals(Boolean.FALSE, run.get("hasExplicitReturn"));
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
+    public void serverShouldRequireNamespaceSpecificTokensWhenConfigured() throws Exception {
+        TestServer testServer = createServer(null, "client-secret", "publisher-secret", "admin-secret");
+        try {
+            assertStatus(testServer.baseUrl + "/api/client/runs", "GET", null, null, 401);
+            assertStatus(testServer.baseUrl + "/api/publisher/scripts", "GET", null, null, 401);
+            assertStatus(testServer.baseUrl + "/api/admin/runs", "GET", null, null, 401);
+
+            assertStatus(testServer.baseUrl + "/api/client/runs", "GET", null, "publisher-secret", 401);
+            assertStatus(testServer.baseUrl + "/api/publisher/scripts", "GET", null, "client-secret", 401);
+            assertStatus(testServer.baseUrl + "/api/admin/runs", "GET", null, "client-secret", 401);
+
+            TeeBoxClient upstreamClient = new TeeBoxClient(testServer.baseUrl, "client-secret", "publisher-secret", "admin-secret");
+            Map<String, Object> registered = upstreamClient.registerScript(
+                "secured_calc",
+                "v1",
+                "return {\"ok\": true, \"sum\": a + b}\n",
+                "secured",
+                Arrays.asList("secure"),
+                true
+            );
+            Assert.assertEquals("secured_calc", registered.get("scriptId"));
+
+            Map<String, Object> props = new LinkedHashMap<String, Object>();
+            props.put("a", Integer.valueOf(40));
+            props.put("b", Integer.valueOf(2));
+            String runId = (String) upstreamClient.submitRun("secured_calc", null, props).get("runId");
+            upstreamClient.waitForRunTerminal(runId, 8000L);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resultData = (Map<String, Object>) upstreamClient.getRunResult(runId).get("resultData");
+            Assert.assertEquals(42.0, ((Number) resultData.get("sum")).doubleValue(), 0.0);
+
+            assertStatus(testServer.baseUrl + "/api/admin/runs/" + runId, "GET", null, "client-secret", 401);
+            Map<String, Object> adminRun = getJsonMap(testServer.baseUrl + "/api/admin/runs/" + runId, 200, "admin-secret");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> run = (Map<String, Object>) adminRun.get("run");
+            Assert.assertEquals("secured_calc", run.get("scriptId"));
+
+            assertStatus(testServer.baseUrl + "/api/runs", "GET", null, null, 404);
+            assertStatus(testServer.baseUrl + "/api/tasks", "GET", null, null, 404);
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
+    public void serverShouldSupportPublisherClientAndAdminNamespaces() throws Exception {
+        TestServer testServer = createServer();
+        try {
+            TeeBoxClient client = new TeeBoxClient(testServer.baseUrl, null);
+
+            Map<String, Object> registered = client.registerScript(
+                "calc_sum",
+                "v1",
+                "return {\"ok\": true, \"sum\": a + b}\n",
+                "sum values",
+                Arrays.asList("calc", "sum"),
+                true
+            );
+            Assert.assertEquals("calc_sum", registered.get("scriptId"));
+            Assert.assertEquals("v1", registered.get("activeVersion"));
+
+            List<Map<String, Object>> scripts = client.listScripts();
+            Assert.assertEquals(1, scripts.size());
+
+            Map<String, Object> props = new LinkedHashMap<String, Object>();
+            props.put("a", Integer.valueOf(40));
+            props.put("b", Integer.valueOf(2));
+
+            Map<String, Object> submitted = client.submitRun("calc_sum", "v1", props);
+            String runId = (String) submitted.get("runId");
+            Assert.assertNotNull(runId);
+
+            Map<String, Object> status = client.waitForRunTerminal(runId, 8000L);
+            Assert.assertEquals("COMPLETED", status.get("status"));
+
+            Map<String, Object> result = client.getRunResult(runId);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resultData = (Map<String, Object>) result.get("resultData");
+            Assert.assertEquals(42.0, ((Number) resultData.get("sum")).doubleValue(), 0.0);
+
+            Map<String, Object> taskSummary = client.getRunTaskSummary(runId);
+            Assert.assertEquals(0.0, ((Number) taskSummary.get("total")).doubleValue(), 0.0);
+
+            Map<String, Object> adminRun = client.getAdminRun(runId);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> adminRunData = (Map<String, Object>) adminRun.get("run");
+            Assert.assertEquals("calc_sum", adminRunData.get("scriptId"));
+            Assert.assertEquals("v1", adminRunData.get("version"));
+        } finally {
+            testServer.close();
+        }
+    }
+
+    @Test
+    public void serverShouldRunActivatedPublisherVersionByDefault() throws Exception {
+        TestServer testServer = createServer();
+        try {
+            TeeBoxClient client = new TeeBoxClient(testServer.baseUrl, null);
+
+            client.registerScript(
+                "versioned_calc",
+                "v1",
+                "return {\"ok\": true, \"sum\": a + b}\n",
+                "v1",
+                Arrays.asList("calc"),
+                true
+            );
+            client.registerScript(
+                "versioned_calc",
+                "v2",
+                "return {\"ok\": true, \"sum\": a + b + 1}\n",
+                "v2",
+                Arrays.asList("calc"),
+                false
+            );
+
+            Map<String, Object> beforeActivateProps = new LinkedHashMap<String, Object>();
+            beforeActivateProps.put("a", Integer.valueOf(40));
+            beforeActivateProps.put("b", Integer.valueOf(2));
+            String runV1 = (String) client.submitRun("versioned_calc", null, beforeActivateProps).get("runId");
+            client.waitForRunTerminal(runV1, 8000L);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resultV1 = (Map<String, Object>) client.getRunResult(runV1).get("resultData");
+            Assert.assertEquals(42.0, ((Number) resultV1.get("sum")).doubleValue(), 0.0);
+
+            Map<String, Object> activated = client.activateScript("versioned_calc", "v2");
+            Assert.assertEquals("v2", activated.get("activeVersion"));
+
+            String runV2 = (String) client.submitRun("versioned_calc", null, beforeActivateProps).get("runId");
+            client.waitForRunTerminal(runV2, 8000L);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resultV2 = (Map<String, Object>) client.getRunResult(runV2).get("resultData");
+            Assert.assertEquals(43.0, ((Number) resultV2.get("sum")).doubleValue(), 0.0);
         } finally {
             testServer.close();
         }
@@ -190,23 +332,23 @@ public class TeeBoxServerTest {
             Map<String, Object> submitA = new LinkedHashMap<String, Object>();
             submitA.put("scriptPath", "query_a.pt");
             submitA.put("props", new LinkedHashMap<String, Object>());
-            String runA = (String) postJson(testServer.baseUrl + "/api/runs", submitA, 202).get("runId");
+            String runA = (String) postJson(testServer.baseUrl + "/api/client/runs", submitA, 202).get("runId");
 
             Map<String, Object> submitB = new LinkedHashMap<String, Object>();
             submitB.put("scriptPath", "query_b.pt");
             submitB.put("props", new LinkedHashMap<String, Object>());
-            String runB = (String) postJson(testServer.baseUrl + "/api/runs", submitB, 202).get("runId");
+            String runB = (String) postJson(testServer.baseUrl + "/api/client/runs", submitB, 202).get("runId");
 
             waitForRunStatus(testServer.baseUrl, runA, "COMPLETED", 8000L);
             waitForRunStatus(testServer.baseUrl, runB, "COMPLETED", 8000L);
 
-            List<Map<String, Object>> completedRuns = getJsonList(testServer.baseUrl + "/api/runs?status=COMPLETED&offset=0&limit=1", 200);
+            List<Map<String, Object>> completedRuns = getJsonList(testServer.baseUrl + "/api/admin/runs?status=COMPLETED&offset=0&limit=1", 200);
             Assert.assertEquals(1, completedRuns.size());
             @SuppressWarnings("unchecked")
             String runStatus = String.valueOf(completedRuns.get(0).get("status"));
             Assert.assertEquals("COMPLETED", runStatus);
 
-            Map<String, Object> filteredTasks = getJsonMap(testServer.baseUrl + "/api/tasks?runId=" + runA + "&status=completed&offset=0&limit=1", 200);
+            Map<String, Object> filteredTasks = getJsonMap(testServer.baseUrl + "/api/admin/tasks?runId=" + runA + "&status=completed&offset=0&limit=1", 200);
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> tasks = (List<Map<String, Object>>) filteredTasks.get("tasks");
             @SuppressWarnings("unchecked")
@@ -231,7 +373,7 @@ public class TeeBoxServerTest {
             Map<String, Object> submit = new LinkedHashMap<String, Object>();
             submit.put("scriptPath", "timeout_task.pt");
             submit.put("props", new LinkedHashMap<String, Object>());
-            String runId = (String) postJson(testServer.baseUrl + "/api/runs", submit, 202).get("runId");
+            String runId = (String) postJson(testServer.baseUrl + "/api/client/runs", submit, 202).get("runId");
 
             Map<String, Object> detail = waitForRunWithTasks(testServer.baseUrl, runId, 1, 1, 8000L);
             @SuppressWarnings("unchecked")
@@ -267,14 +409,14 @@ public class TeeBoxServerTest {
                 Map<String, Object> submit = new LinkedHashMap<String, Object>();
                 submit.put("scriptPath", "archive_run.pt");
                 submit.put("props", new LinkedHashMap<String, Object>());
-                String runId = (String) postJson(testServer.baseUrl + "/api/runs", submit, 202).get("runId");
+                String runId = (String) postJson(testServer.baseUrl + "/api/client/runs", submit, 202).get("runId");
 
                 Map<String, Object> completedDetail = waitForRunStatus(testServer.baseUrl, runId, "COMPLETED", 8000L);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> completedRun = (Map<String, Object>) completedDetail.get("run");
                 Assert.assertEquals(Boolean.TRUE, completedRun.get("archived"));
 
-                List<Map<String, Object>> runsAfterArchive = getJsonList(testServer.baseUrl + "/api/runs", 200);
+                List<Map<String, Object>> runsAfterArchive = getJsonList(testServer.baseUrl + "/api/admin/runs", 200);
                 Assert.assertTrue(containsRun(runsAfterArchive, runId));
             } finally {
                 testServer.close();
@@ -300,7 +442,7 @@ public class TeeBoxServerTest {
                 Map<String, Object> submit = new LinkedHashMap<String, Object>();
                 submit.put("scriptPath", "purge_run.pt");
                 submit.put("props", new LinkedHashMap<String, Object>());
-                String runId = (String) postJson(testServer.baseUrl + "/api/runs", submit, 202).get("runId");
+                String runId = (String) postJson(testServer.baseUrl + "/api/client/runs", submit, 202).get("runId");
 
                 waitForRunAbsentFromList(testServer.baseUrl, runId, 8000L);
             } finally {
@@ -355,7 +497,7 @@ public class TeeBoxServerTest {
     private Map<String, Object> waitForRunWithTasks(String baseUrl, String runId, int taskCount, int minThreads, long timeoutMs, String bearerToken) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/runs/" + runId, 200, bearerToken);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/admin/runs/" + runId, 200, bearerToken);
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> tasks = (List<Map<String, Object>>) detail.get("tasks");
             @SuppressWarnings("unchecked")
@@ -376,7 +518,7 @@ public class TeeBoxServerTest {
     private Map<String, Object> waitForRunStatus(String baseUrl, String runId, String status, long timeoutMs, String bearerToken) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/runs/" + runId, 200, bearerToken);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/admin/runs/" + runId, 200, bearerToken);
             @SuppressWarnings("unchecked")
             Map<String, Object> run = (Map<String, Object>) detail.get("run");
             if (status.equals(run.get("status"))) {
@@ -395,7 +537,7 @@ public class TeeBoxServerTest {
     private Map<String, Object> waitForTaskStatus(String baseUrl, String taskId, String status, long timeoutMs, String bearerToken) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/tasks/" + taskId, 200, bearerToken);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/admin/tasks/" + taskId, 200, bearerToken);
             @SuppressWarnings("unchecked")
             Map<String, Object> task = (Map<String, Object>) detail.get("task");
             if (status.equals(task.get("status"))) {
@@ -410,7 +552,7 @@ public class TeeBoxServerTest {
     private Map<String, Object> waitForTaskTimeoutExceeded(String baseUrl, String taskId, long timeoutMs) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            Map<String, Object> detail = getJsonMap(baseUrl + "/api/tasks/" + taskId, 200);
+            Map<String, Object> detail = getJsonMap(baseUrl + "/api/admin/tasks/" + taskId, 200);
             @SuppressWarnings("unchecked")
             Map<String, Object> task = (Map<String, Object>) detail.get("task");
             if (Boolean.TRUE.equals(task.get("timeoutExceeded"))) {
@@ -425,7 +567,7 @@ public class TeeBoxServerTest {
     private void waitForRunAbsentFromList(String baseUrl, String runId, long timeoutMs) throws Exception {
         long start = System.currentTimeMillis();
         while ((System.currentTimeMillis() - start) < timeoutMs) {
-            List<Map<String, Object>> runs = getJsonList(baseUrl + "/api/runs", 200);
+            List<Map<String, Object>> runs = getJsonList(baseUrl + "/api/admin/runs", 200);
             if (!containsRun(runs, runId)) {
                 return;
             }
@@ -439,6 +581,13 @@ public class TeeBoxServerTest {
     }
 
     private TestServer createServer(String apiToken) throws Exception {
+        return createServer(apiToken, null, null, null);
+    }
+
+    private TestServer createServer(String apiToken,
+                                    String clientApiToken,
+                                    String publisherApiToken,
+                                    String adminApiToken) throws Exception {
         File scriptsRoot = Files.createTempDirectory("propertee-teebox-scripts").toFile();
         File dataDir = Files.createTempDirectory("propertee-teebox-data").toFile();
 
@@ -449,6 +598,9 @@ public class TeeBoxServerTest {
         config.dataDir = dataDir;
         config.maxConcurrentRuns = 2;
         config.apiToken = apiToken;
+        config.clientApiToken = clientApiToken;
+        config.publisherApiToken = publisherApiToken;
+        config.adminApiToken = adminApiToken;
 
         TeeBoxServer server = new TeeBoxServer(config);
         server.start();
@@ -505,8 +657,15 @@ public class TeeBoxServerTest {
     }
 
     private List<Map<String, Object>> getJsonList(String url, int expectedStatus) throws IOException {
+        return getJsonList(url, expectedStatus, null);
+    }
+
+    private List<Map<String, Object>> getJsonList(String url, int expectedStatus, String bearerToken) throws IOException {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("GET");
+        if (bearerToken != null) {
+            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
         int status = conn.getResponseCode();
         Assert.assertEquals(expectedStatus, status);
         return readJsonList(conn);

@@ -21,6 +21,15 @@ run {
     }
 }
 
+task runTeeBoxUpstream(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.propertee.teebox.TeeBoxUpstreamMockMain'
+    standardInput = System.in
+    systemProperties System.properties.findAll { key, value ->
+        key.startsWith('propertee.teebox.upstream.')
+    }
+}
+
 def externalRuntime = {
     configurations.runtimeClasspath.filter { !it.name.startsWith('propertee-core') }
 }

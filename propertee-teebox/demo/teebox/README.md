@@ -29,6 +29,8 @@ http://127.0.0.1:18080/admin
   - Starts a long-running external task and waits for it so an admin can kill it from the UI or API.
 - `04_detached_task.pt`
   - Starts an external task and exits the ProperTee run immediately so the task remains visible as a detached process.
+- `05_registered_sum.pt`
+  - Minimal registered-script example for the `publisher -> client` flow.
 
 ## Suggested checks
 
@@ -36,6 +38,21 @@ http://127.0.0.1:18080/admin
 2. Submit `02_multi_threads.pt` and watch the thread table update.
 3. Submit `03_long_task_kill.pt`, open the task page, and use `Kill Task`.
 4. Submit `04_detached_task.pt`, let the run finish, and confirm the task is still visible in the task list.
+5. Register `05_registered_sum.pt` through the upstream mock and confirm the result JSON returns `sum = 42`.
+
+## Upstream Mock Example
+
+Run the upstream mock against a live TeeBox instance:
+
+```bash
+./gradlew :propertee-teebox:runTeeBoxUpstream \
+  -Dpropertee.teebox.upstream.baseUrl=http://127.0.0.1:18080 \
+  -Dpropertee.teebox.upstream.scriptId=calc_sum \
+  -Dpropertee.teebox.upstream.version=v1 \
+  -Dpropertee.teebox.upstream.scriptFile=$PWD/propertee-teebox/demo/teebox/05_registered_sum.pt \
+  -Dpropertee.teebox.upstream.activate=true \
+  -Dpropertee.teebox.upstream.propsJson='{"a":40,"b":2}'
+```
 
 ## Useful API endpoints
 

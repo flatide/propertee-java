@@ -64,6 +64,33 @@ public class TeeBoxConfigTest {
         }
     }
 
+    @Test
+    public void shouldResolveNamespaceTokensWithFallback() throws Exception {
+        File root = Files.createTempDirectory("propertee-teebox-config-tokens").toFile();
+        File configFile = new File(root, "teebox.properties");
+        write(configFile,
+            "propertee.teebox.scriptsRoot=" + new File(root, "scripts").getAbsolutePath() + "\n" +
+            "propertee.teebox.dataDir=" + new File(root, "data").getAbsolutePath() + "\n" +
+            "propertee.teebox.apiToken=default-token\n" +
+            "propertee.teebox.clientApiToken=client-token\n" +
+            "propertee.teebox.publisherApiToken=publisher-token\n");
+
+        String oldConfig = System.getProperty("propertee.teebox.config");
+        System.setProperty("propertee.teebox.config", configFile.getAbsolutePath());
+        try {
+            TeeBoxConfig config = TeeBoxConfig.fromArgs(new String[0]);
+            Assert.assertEquals("default-token", config.apiToken);
+            Assert.assertEquals("client-token", config.clientApiToken);
+            Assert.assertEquals("publisher-token", config.publisherApiToken);
+            Assert.assertNull(config.adminApiToken);
+            Assert.assertEquals("client-token", config.tokenForClientApi());
+            Assert.assertEquals("publisher-token", config.tokenForPublisherApi());
+            Assert.assertEquals("default-token", config.tokenForAdminApi());
+        } finally {
+            restoreProperty("propertee.teebox.config", oldConfig);
+        }
+    }
+
     private static void write(File file, String content) throws Exception {
         File parent = file.getParentFile();
         if (parent != null && !parent.exists()) {

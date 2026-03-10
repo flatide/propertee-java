@@ -140,88 +140,20 @@ public class TeeBoxServer {
             String method = exchange.getRequestMethod();
             String path = exchange.getRequestURI().getPath();
             try {
-                if (!isAuthorized(exchange)) {
+                if (!isAuthorized(exchange, path)) {
                     writeJson(exchange, HttpURLConnection.HTTP_UNAUTHORIZED, errorMap("Unauthorized"));
                     return;
                 }
-                if ("GET".equals(method) && "/api/runs".equals(path)) {
-                    Map<String, String> query = parseQuery(exchange);
-                    String status = trimToNull(query.get("status"));
-                    int offset = parseInt(query.get("offset"), 0);
-                    int limit = parseInt(query.get("limit"), -1);
-                    writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listRuns(status, offset, limit));
+                if (path.startsWith("/api/client/") || "/api/client".equals(path)) {
+                    handleClientApi(exchange, method, path);
                     return;
                 }
-                if ("POST".equals(method) && "/api/runs".equals(path)) {
-                    RunRequest request = parseRunRequest(exchange);
-                    RunInfo run = runManager.submit(request);
-                    writeJson(exchange, HttpURLConnection.HTTP_ACCEPTED, run);
+                if (path.startsWith("/api/admin/") || "/api/admin".equals(path)) {
+                    handleAdminApi(exchange, method, path);
                     return;
                 }
-                if ("GET".equals(method) && path.startsWith("/api/runs/")) {
-                    String suffix = path.substring("/api/runs/".length());
-                    if (suffix.endsWith("/threads")) {
-                        String runId = suffix.substring(0, suffix.length() - "/threads".length());
-                        writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listThreads(runId));
-                        return;
-                    }
-                    if (suffix.endsWith("/tasks")) {
-                        String runId = suffix.substring(0, suffix.length() - "/tasks".length());
-                        writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listTasksForRun(runId));
-                        return;
-                    }
-                    Map<String, Object> detail = buildRunDetailMap(suffix);
-                    if (detail == null) {
-                        writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Run not found"));
-                        return;
-                    }
-                    writeJson(exchange, HttpURLConnection.HTTP_OK, detail);
-                    return;
-                }
-                if ("POST".equals(method) && path.startsWith("/api/runs/") && path.endsWith("/kill-tasks")) {
-                    String runId = path.substring("/api/runs/".length(), path.length() - "/kill-tasks".length());
-                    Map<String, Object> result = new LinkedHashMap<String, Object>();
-                    result.put("runId", runId);
-                    result.put("killed", Integer.valueOf(runManager.killRunTasks(runId)));
-                    writeJson(exchange, HttpURLConnection.HTTP_OK, result);
-                    return;
-                }
-                if ("GET".equals(method) && "/api/tasks".equals(path)) {
-                    Map<String, String> query = parseQuery(exchange);
-                    String runId = trimToNull(query.get("runId"));
-                    String status = trimToNull(query.get("status"));
-                    int offset = parseInt(query.get("offset"), 0);
-                    int limit = parseInt(query.get("limit"), -1);
-                    Map<String, Object> payload = new LinkedHashMap<String, Object>();
-                    payload.put("tasks", runManager.listTasks(runId, status, offset, limit));
-                    if (runId == null && status == null && offset == 0 && limit <= 0) {
-                        payload.put("detached", runManager.listDetachedTasks());
-                    } else {
-                        payload.put("detached", new ArrayList<TaskInfo>());
-                    }
-                    writeJson(exchange, HttpURLConnection.HTTP_OK, payload);
-                    return;
-                }
-                if ("GET".equals(method) && path.startsWith("/api/tasks/")) {
-                    String taskId = path.substring("/api/tasks/".length());
-                    if (taskId.endsWith("/kill")) {
-                        writeJson(exchange, HttpURLConnection.HTTP_BAD_METHOD, errorMap("Use POST"));
-                        return;
-                    }
-                    Map<String, Object> detail = buildTaskDetailMap(taskId);
-                    if (detail == null) {
-                        writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Task not found"));
-                        return;
-                    }
-                    writeJson(exchange, HttpURLConnection.HTTP_OK, detail);
-                    return;
-                }
-                if ("POST".equals(method) && path.startsWith("/api/tasks/") && path.endsWith("/kill")) {
-                    String taskId = path.substring("/api/tasks/".length(), path.length() - "/kill".length());
-                    Map<String, Object> result = new LinkedHashMap<String, Object>();
-                    result.put("taskId", taskId);
-                    result.put("killed", Boolean.valueOf(runManager.killTask(taskId)));
-                    writeJson(exchange, HttpURLConnection.HTTP_OK, result);
+                if (path.startsWith("/api/publisher/") || "/api/publisher".equals(path)) {
+                    handlePublisherApi(exchange, method, path);
                     return;
                 }
                 writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
@@ -233,28 +165,231 @@ public class TeeBoxServer {
         }
     }
 
-    private boolean isAuthorized(HttpExchange exchange) {
-        if (config.apiToken == null || config.apiToken.length() == 0) {
+    private boolean isAuthorized(HttpExchange exchange, String path) {
+        String requiredToken = requiredApiToken(path);
+        if (requiredToken == null || requiredToken.length() == 0) {
             return true;
         }
         Headers headers = exchange.getRequestHeaders();
         String auth = headers.getFirst("Authorization");
-        return ("Bearer " + config.apiToken).equals(auth);
+        return ("Bearer " + requiredToken).equals(auth);
+    }
+
+    private String requiredApiToken(String path) {
+        if (path.startsWith("/api/client/") || "/api/client".equals(path)) {
+            return config.tokenForClientApi();
+        }
+        if (path.startsWith("/api/publisher/") || "/api/publisher".equals(path)) {
+            return config.tokenForPublisherApi();
+        }
+        if (path.startsWith("/api/admin/") || "/api/admin".equals(path)) {
+            return config.tokenForAdminApi();
+        }
+        return null;
+    }
+
+    private void handleClientApi(HttpExchange exchange, String method, String path) throws IOException {
+        if ("GET".equals(method) && "/api/client/runs".equals(path)) {
+            Map<String, String> query = parseQuery(exchange);
+            String status = trimToNull(query.get("status"));
+            int offset = parseInt(query.get("offset"), 0);
+            int limit = parseInt(query.get("limit"), -1);
+            List<RunInfo> runs = runManager.listRuns(status, offset, limit);
+            List<Map<String, Object>> payload = new ArrayList<Map<String, Object>>();
+            for (RunInfo run : runs) {
+                payload.add(buildClientRunSummary(run));
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, payload);
+            return;
+        }
+        if ("POST".equals(method) && "/api/client/runs".equals(path)) {
+            RunRequest request = parseRunRequest(exchange);
+            RunInfo run = runManager.submit(request);
+            writeJson(exchange, HttpURLConnection.HTTP_ACCEPTED, buildClientRunSummary(run));
+            return;
+        }
+        if ("GET".equals(method) && path.startsWith("/api/client/runs/")) {
+            String suffix = path.substring("/api/client/runs/".length());
+            if (suffix.endsWith("/status")) {
+                String runId = suffix.substring(0, suffix.length() - "/status".length());
+                Map<String, Object> status = buildClientRunStatusMap(runId);
+                if (status == null) {
+                    writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Run not found"));
+                    return;
+                }
+                writeJson(exchange, HttpURLConnection.HTTP_OK, status);
+                return;
+            }
+            if (suffix.endsWith("/result")) {
+                String runId = suffix.substring(0, suffix.length() - "/result".length());
+                Map<String, Object> result = buildClientRunResultMap(runId);
+                if (result == null) {
+                    writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Run not found"));
+                    return;
+                }
+                writeJson(exchange, HttpURLConnection.HTTP_OK, result);
+                return;
+            }
+            if (suffix.endsWith("/tasks-summary")) {
+                String runId = suffix.substring(0, suffix.length() - "/tasks-summary".length());
+                Map<String, Object> summary = buildClientTaskSummaryMap(runId);
+                if (summary == null) {
+                    writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Run not found"));
+                    return;
+                }
+                writeJson(exchange, HttpURLConnection.HTTP_OK, summary);
+                return;
+            }
+            Map<String, Object> detail = buildClientRunDetailMap(suffix);
+            if (detail == null) {
+                writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Run not found"));
+                return;
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, detail);
+            return;
+        }
+        writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
+    }
+
+    private void handleAdminApi(HttpExchange exchange, String method, String path) throws IOException {
+        if ("GET".equals(method) && "/api/admin/runs".equals(path)) {
+            Map<String, String> query = parseQuery(exchange);
+            String status = trimToNull(query.get("status"));
+            int offset = parseInt(query.get("offset"), 0);
+            int limit = parseInt(query.get("limit"), -1);
+            writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listRuns(status, offset, limit));
+            return;
+        }
+        if ("GET".equals(method) && path.startsWith("/api/admin/runs/")) {
+            String suffix = path.substring("/api/admin/runs/".length());
+            if (suffix.endsWith("/threads")) {
+                String runId = suffix.substring(0, suffix.length() - "/threads".length());
+                writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listThreads(runId));
+                return;
+            }
+            if (suffix.endsWith("/tasks")) {
+                String runId = suffix.substring(0, suffix.length() - "/tasks".length());
+                writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listTasksForRun(runId));
+                return;
+            }
+            Map<String, Object> detail = buildRunDetailMap(suffix);
+            if (detail == null) {
+                writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Run not found"));
+                return;
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, detail);
+            return;
+        }
+        if ("POST".equals(method) && path.startsWith("/api/admin/runs/") && path.endsWith("/kill-tasks")) {
+            String runId = path.substring("/api/admin/runs/".length(), path.length() - "/kill-tasks".length());
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("runId", runId);
+            result.put("killed", Integer.valueOf(runManager.killRunTasks(runId)));
+            writeJson(exchange, HttpURLConnection.HTTP_OK, result);
+            return;
+        }
+        if ("GET".equals(method) && "/api/admin/tasks".equals(path)) {
+            Map<String, String> query = parseQuery(exchange);
+            String runId = trimToNull(query.get("runId"));
+            String status = trimToNull(query.get("status"));
+            int offset = parseInt(query.get("offset"), 0);
+            int limit = parseInt(query.get("limit"), -1);
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("tasks", runManager.listTasks(runId, status, offset, limit));
+            if (runId == null && status == null && offset == 0 && limit <= 0) {
+                payload.put("detached", runManager.listDetachedTasks());
+            } else {
+                payload.put("detached", new ArrayList<TaskInfo>());
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, payload);
+            return;
+        }
+        if ("GET".equals(method) && path.startsWith("/api/admin/tasks/")) {
+            String taskId = path.substring("/api/admin/tasks/".length());
+            if (taskId.endsWith("/kill")) {
+                writeJson(exchange, HttpURLConnection.HTTP_BAD_METHOD, errorMap("Use POST"));
+                return;
+            }
+            Map<String, Object> detail = buildTaskDetailMap(taskId);
+            if (detail == null) {
+                writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Task not found"));
+                return;
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, detail);
+            return;
+        }
+        if ("POST".equals(method) && path.startsWith("/api/admin/tasks/") && path.endsWith("/kill")) {
+            String taskId = path.substring("/api/admin/tasks/".length(), path.length() - "/kill".length());
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("taskId", taskId);
+            result.put("killed", Boolean.valueOf(runManager.killTask(taskId)));
+            writeJson(exchange, HttpURLConnection.HTTP_OK, result);
+            return;
+        }
+        writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
+    }
+
+    private void handlePublisherApi(HttpExchange exchange, String method, String path) throws IOException {
+        if ("GET".equals(method) && "/api/publisher/scripts".equals(path)) {
+            writeJson(exchange, HttpURLConnection.HTTP_OK, runManager.listScripts());
+            return;
+        }
+        if ("POST".equals(method) && "/api/publisher/scripts".equals(path)) {
+            ScriptPublishRequest request = parseScriptPublishRequest(exchange);
+            ScriptInfo info = runManager.registerScriptVersion(request.scriptId, request.version, request.content, request.description, request.labels, request.activate);
+            writeJson(exchange, HttpURLConnection.HTTP_CREATED, info);
+            return;
+        }
+        if ("GET".equals(method) && path.startsWith("/api/publisher/scripts/")) {
+            String scriptId = path.substring("/api/publisher/scripts/".length());
+            if (scriptId.endsWith("/activate") || scriptId.endsWith("/versions")) {
+                writeJson(exchange, HttpURLConnection.HTTP_BAD_METHOD, errorMap("Use POST"));
+                return;
+            }
+            ScriptInfo info = runManager.getScript(scriptId);
+            if (info == null) {
+                writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Script not found"));
+                return;
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, info);
+            return;
+        }
+        if ("POST".equals(method) && path.startsWith("/api/publisher/scripts/") && path.endsWith("/versions")) {
+            String scriptId = path.substring("/api/publisher/scripts/".length(), path.length() - "/versions".length());
+            ScriptPublishRequest request = parseScriptPublishRequest(exchange);
+            if (request.scriptId == null || request.scriptId.length() == 0) {
+                request.scriptId = scriptId;
+            }
+            if (!scriptId.equals(request.scriptId)) {
+                throw new IllegalArgumentException("scriptId in path and body must match");
+            }
+            ScriptInfo info = runManager.registerScriptVersion(request.scriptId, request.version, request.content, request.description, request.labels, request.activate);
+            writeJson(exchange, HttpURLConnection.HTTP_CREATED, info);
+            return;
+        }
+        if ("POST".equals(method) && path.startsWith("/api/publisher/scripts/") && path.endsWith("/activate")) {
+            String scriptId = path.substring("/api/publisher/scripts/".length(), path.length() - "/activate".length());
+            Map<String, Object> raw = parseJsonBody(exchange);
+            Object version = raw.get("version");
+            if (!(version instanceof String) || ((String) version).trim().length() == 0) {
+                throw new IllegalArgumentException("version is required");
+            }
+            ScriptInfo info = runManager.activateScriptVersion(scriptId, ((String) version).trim());
+            writeJson(exchange, HttpURLConnection.HTTP_OK, info);
+            return;
+        }
+        writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
     }
 
     private RunRequest parseRunRequest(HttpExchange exchange) throws IOException {
-        String body = readBody(exchange);
-        if (body == null || body.trim().length() == 0) {
-            throw new IllegalArgumentException("Request body is required");
-        }
-        Type type = new TypeToken<Map<String, Object>>() {}.getType();
-        Map<String, Object> raw = gson.fromJson(body, type);
-        if (raw == null) {
-            throw new IllegalArgumentException("Invalid JSON body");
-        }
+        Map<String, Object> raw = parseJsonBody(exchange);
         RunRequest request = new RunRequest();
         Object scriptPath = raw.get("scriptPath");
         request.scriptPath = scriptPath instanceof String ? ((String) scriptPath).trim() : null;
+        Object scriptId = raw.get("scriptId");
+        request.scriptId = scriptId instanceof String ? ((String) scriptId).trim() : null;
+        Object version = raw.get("version");
+        request.version = version instanceof String ? ((String) version).trim() : null;
         Object props = raw.get("props");
         if (props instanceof Map) {
             @SuppressWarnings("unchecked")
@@ -270,6 +405,45 @@ public class TeeBoxServer {
             request.warnLoops = ((Boolean) warnLoops).booleanValue();
         }
         return request;
+    }
+
+    private ScriptPublishRequest parseScriptPublishRequest(HttpExchange exchange) throws IOException {
+        Map<String, Object> raw = parseJsonBody(exchange);
+        ScriptPublishRequest request = new ScriptPublishRequest();
+        Object scriptId = raw.get("scriptId");
+        request.scriptId = scriptId instanceof String ? ((String) scriptId).trim() : null;
+        Object version = raw.get("version");
+        request.version = version instanceof String ? ((String) version).trim() : null;
+        Object content = raw.get("content");
+        request.content = content instanceof String ? (String) content : null;
+        Object description = raw.get("description");
+        request.description = description instanceof String ? (String) description : null;
+        Object activate = raw.get("activate");
+        request.activate = activate instanceof Boolean && ((Boolean) activate).booleanValue();
+        Object labels = raw.get("labels");
+        if (labels instanceof List) {
+            @SuppressWarnings("unchecked")
+            List<Object> rawLabels = (List<Object>) labels;
+            for (Object value : rawLabels) {
+                if (value instanceof String) {
+                    request.labels.add(((String) value).trim());
+                }
+            }
+        }
+        return request;
+    }
+
+    private Map<String, Object> parseJsonBody(HttpExchange exchange) throws IOException {
+        String body = readBody(exchange);
+        if (body == null || body.trim().length() == 0) {
+            throw new IllegalArgumentException("Request body is required");
+        }
+        Type type = new TypeToken<Map<String, Object>>() {}.getType();
+        Map<String, Object> raw = gson.fromJson(body, type);
+        if (raw == null) {
+            throw new IllegalArgumentException("Invalid JSON body");
+        }
+        return raw;
     }
 
     private Map<String, String> parseForm(HttpExchange exchange) throws IOException {
@@ -388,6 +562,99 @@ public class TeeBoxServer {
         return detail;
     }
 
+    private Map<String, Object> buildClientRunDetailMap(String runId) {
+        RunInfo run = runManager.getRun(runId);
+        if (run == null) {
+            return null;
+        }
+        return buildClientRunSummary(run);
+    }
+
+    private Map<String, Object> buildClientRunStatusMap(String runId) {
+        RunInfo run = runManager.getRun(runId);
+        if (run == null) {
+            return null;
+        }
+        Map<String, Object> status = new LinkedHashMap<String, Object>();
+        status.put("runId", run.runId);
+        status.put("scriptId", run.scriptId);
+        status.put("version", run.version);
+        status.put("status", run.status != null ? run.status.name() : null);
+        status.put("createdAt", Long.valueOf(run.createdAt));
+        status.put("startedAt", run.startedAt);
+        status.put("endedAt", run.endedAt);
+        status.put("hasExplicitReturn", Boolean.valueOf(run.hasExplicitReturn));
+        status.put("errorMessage", run.errorMessage);
+        return status;
+    }
+
+    private Map<String, Object> buildClientRunResultMap(String runId) {
+        RunInfo run = runManager.getRun(runId);
+        if (run == null) {
+            return null;
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("runId", run.runId);
+        result.put("scriptId", run.scriptId);
+        result.put("version", run.version);
+        result.put("status", run.status != null ? run.status.name() : null);
+        result.put("hasExplicitReturn", Boolean.valueOf(run.hasExplicitReturn));
+        result.put("resultData", run.resultData);
+        result.put("errorMessage", run.errorMessage);
+        return result;
+    }
+
+    private Map<String, Object> buildClientTaskSummaryMap(String runId) {
+        RunInfo run = runManager.getRun(runId);
+        if (run == null) {
+            return null;
+        }
+        List<TaskInfo> tasks = runManager.listTasksForRun(runId);
+        int running = 0;
+        int completed = 0;
+        int failed = 0;
+        int killed = 0;
+        int other = 0;
+        for (TaskInfo task : tasks) {
+            if ("running".equalsIgnoreCase(task.status)) {
+                running++;
+            } else if ("completed".equalsIgnoreCase(task.status)) {
+                completed++;
+            } else if ("failed".equalsIgnoreCase(task.status)) {
+                failed++;
+            } else if ("killed".equalsIgnoreCase(task.status)) {
+                killed++;
+            } else {
+                other++;
+            }
+        }
+        Map<String, Object> summary = new LinkedHashMap<String, Object>();
+        summary.put("runId", runId);
+        summary.put("total", Integer.valueOf(tasks.size()));
+        summary.put("running", Integer.valueOf(running));
+        summary.put("completed", Integer.valueOf(completed));
+        summary.put("failed", Integer.valueOf(failed));
+        summary.put("killed", Integer.valueOf(killed));
+        summary.put("other", Integer.valueOf(other));
+        return summary;
+    }
+
+    private Map<String, Object> buildClientRunSummary(RunInfo run) {
+        Map<String, Object> summary = new LinkedHashMap<String, Object>();
+        summary.put("runId", run.runId);
+        summary.put("scriptId", run.scriptId);
+        summary.put("version", run.version);
+        summary.put("scriptPath", run.scriptPath);
+        summary.put("status", run.status != null ? run.status.name() : null);
+        summary.put("createdAt", Long.valueOf(run.createdAt));
+        summary.put("startedAt", run.startedAt);
+        summary.put("endedAt", run.endedAt);
+        summary.put("hasExplicitReturn", Boolean.valueOf(run.hasExplicitReturn));
+        summary.put("resultSummary", run.resultSummary);
+        summary.put("errorMessage", run.errorMessage);
+        return summary;
+    }
+
     private void writeJson(HttpExchange exchange, int status, Object payload) throws IOException {
         byte[] bytes = gson.toJson(payload).getBytes("UTF-8");
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
@@ -480,5 +747,14 @@ public class TeeBoxServer {
     private String urlPath(String value) {
         if (value == null) return "";
         return value.replace(" ", "%20");
+    }
+
+    private static class ScriptPublishRequest {
+        String scriptId;
+        String version;
+        String content;
+        String description;
+        List<String> labels = new ArrayList<String>();
+        boolean activate;
     }
 }
