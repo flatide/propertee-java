@@ -35,6 +35,7 @@ public class TaskEngine {
     private static final long WAIT_POLL_INITIAL_MS = 50L;
     private static final long WAIT_POLL_MAX_MS = 1000L;
     private static final long TRACKED_PID_WAIT_MS = 500L;
+    private static final long START_READY_WAIT_MS = 2000L;
     private static final long DEFAULT_RETENTION_MS = 24L * 60L * 60L * 1000L;
     private static final long DEFAULT_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
 
@@ -104,7 +105,7 @@ public class TaskEngine {
         task.pgid = getProcessGroupId(task.pid);
         task.status = TaskStatus.RUNNING;
         ownedTaskIds.add(task.taskId);
-        task.alive = isOurProcess(task);
+        awaitStartReady(task);
         refreshOutputTimestamps(task);
         saveMeta(task);
         return task;
@@ -808,6 +809,48 @@ public class TaskEngine {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private void awaitStartReady(Task task) {
+        long start = System.currentTimeMillis();
+        while ((System.currentTimeMillis() - start) < START_READY_WAIT_MS) {
+            task.pidStartTime = getProcessStartTime(task.pid);
+            task.pgid = getProcessGroupId(task.pid);
+            if (isOurProcess(task)) {
+                task.alive = true;
+                return;
+            }
+
+            Integer exitCode = readExitCode(task);
+            if (exitCode != null) {
+                finalizeExitedTask(task);
+                return;
+            }
+
+            try {
+                Thread.sleep(25L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted while waiting for task start readiness", e);
+            }
+        }
+
+        task.pidStartTime = getProcessStartTime(task.pid);
+        task.pgid = getProcessGroupId(task.pid);
+        if (isOurProcess(task)) {
+            task.alive = true;
+            return;
+        }
+
+        Integer exitCode = readExitCodeWithGrace(task, 200L);
+        if (exitCode != null) {
+            finalizeExitedTask(task);
+            return;
+        }
+
+        throw new RuntimeException(
+            "Detached task did not reach a controllable running state (pid=" + task.pid + ")"
+        );
     }
 
     private boolean isOurProcess(Task task) {
