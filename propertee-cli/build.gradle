@@ -26,8 +26,8 @@ task compileJava7(type: JavaCompile) {
     source = sourceSets.main.java
     classpath = files(project(':propertee-core').tasks.named('compileJava7').get().destinationDirectory) + externalRuntime()
     destinationDirectory = file("${buildDir}/classes/java7")
-    sourceCompatibility = '1.7'
-    targetCompatibility = '1.7'
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
     options.encoding = 'UTF-8'
 }
 
