@@ -34,24 +34,14 @@ def externalRuntime = {
     configurations.runtimeClasspath.filter { !it.name.startsWith('propertee-core') }
 }
 
-task compileJava7(type: JavaCompile) {
-    dependsOn project(':propertee-core').tasks.named('compileJava7')
-    source = sourceSets.main.java
-    classpath = files(project(':propertee-core').tasks.named('compileJava7').get().destinationDirectory) + externalRuntime()
-    destinationDirectory = file("${buildDir}/classes/java7")
-    sourceCompatibility = '1.8'
-    targetCompatibility = '1.8'
-    options.encoding = 'UTF-8'
-}
-
 task teeBoxJar(type: Jar) {
-    dependsOn compileJava7
+    dependsOn classes, project(':propertee-core').tasks.named('classes')
     archiveBaseName = 'propertee-teebox'
     manifest {
         attributes 'Main-Class': 'com.propertee.teebox.TeeBoxMain'
     }
-    from compileJava7.destinationDirectory
-    from project(':propertee-core').tasks.named('compileJava7').get().destinationDirectory
+    from sourceSets.main.output
+    from project(':propertee-core').sourceSets.main.output
     from {
         externalRuntime().collect { it.isDirectory() ? it : zipTree(it) }
     }
