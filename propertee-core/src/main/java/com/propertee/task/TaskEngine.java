@@ -697,6 +697,8 @@ public class TaskEngine {
         task.lastStderrAt = task.stderrFile.exists() ? Long.valueOf(task.stderrFile.lastModified()) : null;
     }
 
+    private static final long LARGE_OUTPUT_THRESHOLD = 10L * 1024L * 1024L;
+
     private TaskObservation toObservation(Task task) {
         TaskObservation observation = new TaskObservation();
         observation.taskId = task.taskId;
@@ -717,7 +719,17 @@ public class TaskEngine {
         if (task.alive && task.pidStartTime <= 0) {
             observation.healthHints.add("IDENTITY_UNVERIFIED");
         }
+        if (!task.archived) {
+            long outputSize = getFileSize(task.stdoutFile) + getFileSize(task.stderrFile);
+            if (outputSize > LARGE_OUTPUT_THRESHOLD) {
+                observation.healthHints.add("LARGE_OUTPUT");
+            }
+        }
         return observation;
+    }
+
+    private long getFileSize(File file) {
+        return file != null && file.exists() ? file.length() : 0L;
     }
 
     private Long getLastOutputAge(Task task) {

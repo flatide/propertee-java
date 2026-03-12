@@ -14,7 +14,7 @@ Multi-module Gradle project with three subprojects:
 |---|---|---|
 | `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, task engine, ANTLR grammar | — |
 | `propertee-cli` | CLI runner (`Main.java`) and interactive REPL (`Repl.java`) | `propertee-core` |
-| `propertee-mockserver` | HTTP admin server for remote script execution, run management, task monitoring | `propertee-core` |
+| `propertee-teebox` | HTTP admin server (TeeBox) for remote script execution, run management, task monitoring | `propertee-core` |
 
 Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Grammar at `propertee-core/grammar/ProperTee.g4`. Tests at `propertee-core/src/test/`.
 
@@ -34,9 +34,9 @@ Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Gram
 ./gradlew jar8                    # Java 8 fat JAR → build/libs/propertee-java-java8.jar
 ./gradlew jarAll                  # Both JARs
 
-# Mock server:
-./gradlew runMockServer           # run mock server (pass -D flags for config)
-./gradlew mockServerZip           # build deployable zip → build/distributions/
+# TeeBox server:
+./gradlew runTeeBox               # run TeeBox server (pass -D flags for config)
+./gradlew teeBoxZip               # build deployable zip → build/distributions/
 
 # Run a script via Gradle:
 ./gradlew :propertee-cli:run --args="sample/01_hello.pt"
@@ -76,7 +76,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-**Script tests:** 79 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-80, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; tests 72 uses `SHELL()`; tests 78-80 test `START_TASK`/`WAIT_TASK`/`CANCEL_TASK`.
+**Script tests:** 79 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-80, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 78-80 test `START_TASK`/`WAIT_TASK`/`CANCEL_TASK`.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -125,7 +125,7 @@ interface Stepper {
 
 | Package | Role |
 |---|---|
-| `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1730 lines), built-in functions, scope management, function definitions |
+| `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1800 lines), built-in functions, scope management, function definitions |
 | `com.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
 | `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
 | `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
@@ -137,7 +137,7 @@ interface Stepper {
 | Package | Module | Role |
 |---|---|---|
 | `com.propertee.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
-| `com.propertee.mockserver` | `propertee-mockserver` | HTTP admin server, run management, script execution service |
+| `com.propertee.teebox` | `propertee-teebox` | TeeBox HTTP server, run management, script execution service, script registry |
 
 ### Key Files
 
@@ -283,16 +283,18 @@ BLOCKED → READY                    (async future completed or timed out)
 
 `BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: loops catch break/continue, function call steppers catch return, statement-level steppers (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper) catch `AsyncPendingException` and return `AWAIT_ASYNC` command for retry.
 
-## Mock Server Subsystem
+## TeeBox Server Subsystem
 
-The mock server (`propertee-mockserver` module) provides an HTTP service for remote ProperTee script execution, designed for HPC environments. Evolution plan documented in `demo/mockserver/PLAN.md`.
+The TeeBox server (`propertee-teebox` module) provides an HTTP service for remote ProperTee script execution, designed for HPC environments. Evolution plan documented in `propertee-teebox/demo/teebox/PLAN.md`.
 
-### Mock Server Architecture
+### TeeBox Architecture
 
 ```
-HTTP Request → MockAdminServer
-                  ├── ApiHandler (/api/*) — JSON API, Bearer token auth
-                  └── AdminHandler (/admin/*) → AdminPageRenderer — HTML UI
+HTTP Request → TeeBoxServer
+                  ├── /api/client/*     — run submission and result polling
+                  ├── /api/publisher/*   — script registration and activation
+                  ├── /api/admin/*       — run/task inspection and control
+                  └── /admin/*           → AdminPageRenderer — HTML UI
                             ↓
                        RunManager (coordinator)
                   ┌────────┴────────┐
@@ -305,17 +307,21 @@ HTTP Request → MockAdminServer
                               tasks/task-{id}/
 ```
 
-### Key Mock Server Classes
+### Key TeeBox Classes
 
 | Class | Role |
 |---|---|
-| `MockAdminServer` | HTTP server (com.sun.net.httpserver). API routes (`/api/runs`, `/api/tasks`) and admin UI routes. Bearer token auth on API via `config.apiToken`. |
+| `TeeBoxServer` | HTTP server (com.sun.net.httpserver). Namespaced API routes (`/api/client`, `/api/publisher`, `/api/admin`) and admin UI routes. Per-namespace Bearer token auth. |
+| `TeeBoxMain` | Process entry point for the TeeBox server. |
+| `TeeBoxClient` | Programmatic client for the TeeBox API. |
 | `RunManager` | Thin coordinator: submits runs to thread pool, delegates to ScriptExecutor and RunRegistry. Manages TaskEngine lifecycle. |
 | `ScriptExecutor` | Stateless script executor: parse → interpret → schedule → collect results. Returns `ExecutionResult` with `hasExplicitReturn` flag and `resultData`. |
+| `ScriptRegistry` | Script version management: register script versions, activate default version, lookup by scriptId. |
 | `RunRegistry` | In-memory run state cache (ConcurrentHashMap) backed by RunStore. Handles run lifecycle (QUEUED → RUNNING → COMPLETED/FAILED), log ring buffers (200 lines), archiving (24h retention → trim logs → 7d purge). On server restart, non-terminal runs marked `SERVER_RESTARTED`. |
 | `RunStore` | File-based persistence for RunInfo. Index-based pagination (`runs/index.json`) with atomic write via tmp+move. All public methods `synchronized`. |
-| `AdminPageRenderer` | HTML page generation for admin UI (extracted from MockAdminServer). |
-| `TeeBoxConfig` | Configuration via system properties (`propertee.teebox.*`): bind address, port, scriptsRoot, dataDir, maxConcurrentRuns, apiToken. |
+| `AdminPageRenderer` | HTML page generation for admin UI. |
+| `TeeBoxConfig` | Configuration via system properties (`propertee.teebox.*`): bind address, port, scriptsRoot, dataDir, maxConcurrentRuns, per-namespace API tokens. |
+| `TeeBoxUpstreamMockMain` | Mock upstream harness for testing the client/publisher API workflow. |
 
 ### TaskEngine (`com.propertee.task`)
 
@@ -329,22 +335,36 @@ Manages detached shell processes. Used by both SHELL()/START_TASK() builtins and
 | `TaskInfo` | DTO with computed fields: elapsedMs, timeoutExceeded, healthHints. |
 | `TaskObservation` | Snapshot from `observe()`: alive, elapsed, output timestamps, health hints (TIMEOUT_EXCEEDED, PROCESS_NOT_FOUND, IDENTITY_UNVERIFIED). |
 
-### Mock Server API
+### TeeBox API
 
 ```bash
-# Run mock server
-./gradlew runMockServer \
+# Run TeeBox server
+./gradlew runTeeBox \
   -Dpropertee.teebox.scriptsRoot=./sample \
   -Dpropertee.teebox.dataDir=/tmp/propertee-data \
   -Dpropertee.teebox.apiToken=secret
 
-# API endpoints (Bearer token required if apiToken set)
-POST /api/runs                     # submit script execution
-GET  /api/runs?status=RUNNING      # list runs (status, offset, limit)
-GET  /api/runs/{runId}             # run detail (includes threads, tasks)
-GET  /api/tasks?runId=xxx          # list tasks (runId, status, offset, limit)
-POST /api/tasks/{taskId}/kill      # kill task
+# API namespaces (Bearer token required if tokens configured)
+# Client API — run submission and result polling
+POST /api/client/runs                     # submit script execution
+GET  /api/client/runs/{runId}             # run status and result
+
+# Publisher API — script registration
+POST /api/publisher/scripts/{scriptId}/versions/{version}   # register script version
+POST /api/publisher/scripts/{scriptId}/activate/{version}   # activate version
+
+# Admin API — inspection and control
+GET  /api/admin/runs?status=RUNNING       # list runs (status, offset, limit)
+GET  /api/admin/runs/{runId}              # run detail (includes threads, tasks)
+GET  /api/admin/tasks?runId=xxx           # list tasks (runId, status, offset, limit)
+POST /api/admin/tasks/{taskId}/kill       # kill task
 ```
+
+**Token configuration:**
+- `propertee.teebox.apiToken` — default fallback for all namespaces
+- `propertee.teebox.clientApiToken` — overrides for `/api/client` routes
+- `propertee.teebox.publisherApiToken` — overrides for `/api/publisher` routes
+- `propertee.teebox.adminApiToken` — overrides for `/api/admin` routes
 
 ### Structured Results Contract
 
@@ -523,6 +543,10 @@ visitor.setIgnoredFunctions(ignored);
 - Semicolons are optional statement separators (treated as whitespace by the lexer)
 - **Syntax highlighting** — ProperTee repo has Vim (`editors/vim/syntax/propertee.vim`) and VS Code (`editors/vscode/syntaxes/propertee.tmLanguage.json`) syntax files. The playground (`propertee-js/docs/index.html`) has its own regex-based syntax highlighting via `highlightSyntax()` — update the `builtins` and `keywords` strings there when adding new built-in functions or keywords. Update all three locations when adding keywords or built-in functions.
 - **Index files** — both RunStore and TaskEngine use `index.json` with atomic write (tmp+move) for filtered pagination. TaskEngine uses `synchronized(indexLock)` for its index; RunStore uses `synchronized(this)` on all public methods.
+
+## CI / Releases
+
+GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts on tag push (e.g., `git tag v0.3.1 && git push origin v0.3.1`). Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`, `propertee-teebox-dist.zip`.
 
 ## Dependencies
 

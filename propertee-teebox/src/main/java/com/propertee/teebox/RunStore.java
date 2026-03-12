@@ -35,6 +35,11 @@ public class RunStore {
     }
 
     public synchronized void save(RunInfo run) {
+        saveRunFile(run);
+        updateIndex(run);
+    }
+
+    public synchronized void saveRunFile(RunInfo run) {
         Writer writer = null;
         try {
             writer = new OutputStreamWriter(new FileOutputStream(fileFor(run.runId)), "UTF-8");
@@ -49,7 +54,6 @@ public class RunStore {
                 }
             }
         }
-        updateIndex(run);
     }
 
     public synchronized RunInfo load(String runId) {

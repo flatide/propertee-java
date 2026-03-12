@@ -4,9 +4,11 @@ import com.propertee.runtime.TypeChecker;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class RunRegistry {
@@ -17,6 +19,9 @@ public class RunRegistry {
     private final long runArchiveRetentionMs;
     private final RunStore runStore;
     private final ConcurrentHashMap<String, RunInfo> runs = new ConcurrentHashMap<String, RunInfo>();
+    private final Set<String> dirtyRunIds = new HashSet<String>();
+    private final Set<String> indexDirtyRunIds = new HashSet<String>();
+    private final Object dirtyLock = new Object();
 
     public RunRegistry(File dataDir,
                        int maxLogLines,
@@ -35,11 +40,10 @@ public class RunRegistry {
 
     public void register(RunInfo run) {
         runs.put(run.runId, run);
-        saveRun(run);
+        saveRunWithIndex(run);
     }
 
     public RunInfo getRun(String runId) {
-        maintainRuns();
         RunInfo run = runs.get(runId);
         return run != null ? copyRun(run) : null;
     }
@@ -49,7 +53,7 @@ public class RunRegistry {
     }
 
     public List<RunInfo> listRuns(String status, int offset, int limit) {
-        maintainRuns();
+        flushDirty();
         List<RunInfo> loaded = runStore.query(status, offset, limit);
         List<RunInfo> copy = new ArrayList<RunInfo>();
         for (RunInfo run : loaded) {
@@ -60,7 +64,6 @@ public class RunRegistry {
     }
 
     public List<RunThreadInfo> listThreads(String runId) {
-        maintainRuns();
         RunInfo run = runs.get(runId);
         if (run == null) {
             return new ArrayList<RunThreadInfo>();
@@ -77,7 +80,7 @@ public class RunRegistry {
             if (run.endedAt != null) {
                 run.endedAt = null;
             }
-            saveRunLocked(run);
+            saveRunWithIndex(run);
         }
     }
 
@@ -88,7 +91,7 @@ public class RunRegistry {
             run.hasExplicitReturn = hasExplicitReturn;
             run.resultData = TypeChecker.deepCopy(resultData);
             run.resultSummary = safeSummary(resultData);
-            saveRunLocked(run);
+            saveRunWithIndex(run);
         }
     }
 
@@ -97,7 +100,7 @@ public class RunRegistry {
             run.status = RunStatus.FAILED;
             run.endedAt = Long.valueOf(System.currentTimeMillis());
             run.errorMessage = message != null ? message : "Unknown error";
-            saveRunLocked(run);
+            saveRunWithIndex(run);
         }
     }
 
@@ -108,7 +111,7 @@ public class RunRegistry {
             while (target.size() > maxLogLines) {
                 target.remove(0);
             }
-            saveRunLocked(run);
+            markDirty(run.runId);
         }
     }
 
@@ -126,11 +129,42 @@ public class RunRegistry {
                     }
                 });
             }
-            saveRunLocked(run);
+            markDirty(run.runId);
+        }
+    }
+
+    public void flushDirty() {
+        List<String> runIds;
+        List<String> indexIds;
+        synchronized (dirtyLock) {
+            if (dirtyRunIds.isEmpty() && indexDirtyRunIds.isEmpty()) {
+                return;
+            }
+            runIds = new ArrayList<String>(dirtyRunIds);
+            dirtyRunIds.clear();
+            indexIds = new ArrayList<String>(indexDirtyRunIds);
+            indexDirtyRunIds.clear();
+        }
+        for (String runId : runIds) {
+            RunInfo run = runs.get(runId);
+            if (run != null) {
+                synchronized (run) {
+                    runStore.saveRunFile(run.copy());
+                }
+            }
+        }
+        for (String runId : indexIds) {
+            RunInfo run = runs.get(runId);
+            if (run != null) {
+                synchronized (run) {
+                    runStore.save(run.copy());
+                }
+            }
         }
     }
 
     public List<String> maintainRuns() {
+        flushDirty();
         long now = System.currentTimeMillis();
         List<String> purgeIds = new ArrayList<String>();
         for (RunInfo run : new ArrayList<RunInfo>(runs.values())) {
@@ -143,7 +177,7 @@ public class RunRegistry {
                 if (!run.archived) {
                     if (runRetentionMs >= 0 && ageMs >= runRetentionMs) {
                         archiveRunLocked(run);
-                        saveRunLocked(run);
+                        saveRunWithIndex(run);
                     }
                     continue;
                 }
@@ -230,13 +264,17 @@ public class RunRegistry {
         }
     }
 
-    private void saveRun(RunInfo run) {
-        synchronized (run) {
-            saveRunLocked(run);
+    private void markDirty(String runId) {
+        synchronized (dirtyLock) {
+            dirtyRunIds.add(runId);
         }
     }
 
-    private void saveRunLocked(RunInfo run) {
+    private void saveRunWithIndex(RunInfo run) {
+        synchronized (dirtyLock) {
+            dirtyRunIds.remove(run.runId);
+            indexDirtyRunIds.remove(run.runId);
+        }
         runStore.save(run.copy());
     }
 

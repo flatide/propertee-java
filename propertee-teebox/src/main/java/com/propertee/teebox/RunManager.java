@@ -18,7 +18,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 public class RunManager {
     private static final int MAX_LOG_LINES = 200;
@@ -26,6 +28,8 @@ public class RunManager {
     private static final int ARCHIVED_STDERR_LINES = 20;
     private static final long DEFAULT_RUN_RETENTION_MS = 24L * 60L * 60L * 1000L;
     private static final long DEFAULT_RUN_ARCHIVE_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L;
+    private static final long FLUSH_INTERVAL_MS = 2000L;
+    private static final long MAINTENANCE_INTERVAL_MS = 60L * 1000L;
 
     private final File scriptsRoot;
     private final File dataDir;
@@ -34,6 +38,7 @@ public class RunManager {
     private final TaskEngine taskEngine;
     private final ThreadPoolExecutor runExecutor;
     private final ScriptExecutor scriptExecutor;
+    private final ScheduledExecutorService maintenanceScheduler;
     private final java.util.concurrent.ConcurrentHashMap<String, Future<?>> activeRuns = new java.util.concurrent.ConcurrentHashMap<String, Future<?>>();
 
     public RunManager(File scriptsRoot, File dataDir, int maxConcurrentRuns) {
@@ -54,6 +59,8 @@ public class RunManager {
         this.taskEngine.archiveExpiredTasks();
         this.scriptExecutor = new ScriptExecutor();
         this.runExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Math.max(1, maxConcurrentRuns));
+        this.maintenanceScheduler = Executors.newSingleThreadScheduledExecutor();
+        startMaintenanceScheduler();
         maintainRuns();
     }
 
@@ -114,17 +121,14 @@ public class RunManager {
     }
 
     public List<RunInfo> listRuns(String status, int offset, int limit) {
-        maintainRuns();
         return runRegistry.listRuns(status, offset, limit);
     }
 
     public RunInfo getRun(String runId) {
-        maintainRuns();
         return runRegistry.getRun(runId);
     }
 
     public List<RunThreadInfo> listThreads(String runId) {
-        maintainRuns();
         return runRegistry.listThreads(runId);
     }
 
@@ -141,29 +145,24 @@ public class RunManager {
     }
 
     public List<TaskInfo> listTasks(String runId, String status, int offset, int limit) {
-        maintainTasks();
         return toInfoList(taskEngine.queryTasks(runId, status, offset, limit));
     }
 
     public TaskInfo getTask(String taskId) {
-        maintainTasks();
         Task task = taskEngine.getTask(taskId);
         if (task == null) return null;
         return toInfo(task);
     }
 
     public TaskObservation observeTask(String taskId) {
-        maintainTasks();
         return taskEngine.observe(taskId);
     }
 
     public String getTaskStdout(String taskId) {
-        maintainTasks();
         return taskEngine.getStdout(taskId);
     }
 
     public String getTaskStderr(String taskId) {
-        maintainTasks();
         return taskEngine.getStderr(taskId);
     }
 
@@ -184,7 +183,34 @@ public class RunManager {
     }
 
     public void shutdown() {
+        maintenanceScheduler.shutdownNow();
+        runRegistry.flushDirty();
         runExecutor.shutdownNow();
+    }
+
+    private void startMaintenanceScheduler() {
+        maintenanceScheduler.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    runRegistry.flushDirty();
+                } catch (Exception e) {
+                    // flush errors logged but not propagated
+                }
+            }
+        }, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+
+        maintenanceScheduler.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    maintainRuns();
+                    maintainTasks();
+                } catch (Exception e) {
+                    // maintenance errors logged but not propagated
+                }
+            }
+        }, MAINTENANCE_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     private void executeRun(final RunInfo run, File scriptFile) {
@@ -229,6 +255,7 @@ public class RunManager {
                     }
                 }
             );
+            runRegistry.flushDirty();
             if (result.success) {
                 runRegistry.markCompleted(run, result.hasExplicitReturn, result.resultData);
             } else {
