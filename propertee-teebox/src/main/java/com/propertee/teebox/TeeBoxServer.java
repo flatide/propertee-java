@@ -36,7 +36,7 @@ public class TeeBoxServer {
 
     public TeeBoxServer(TeeBoxConfig config) throws IOException {
         this.config = config;
-        this.runManager = new RunManager(config.scriptsRoot, config.dataDir, config.maxConcurrentRuns);
+        this.runManager = new RunManager(config.scriptsRoot, config.dataDir, config.maxConcurrentRuns, config);
         this.pageRenderer = new AdminPageRenderer(config, runManager, gson);
         this.server = HttpServer.create(new InetSocketAddress(config.bindAddress, config.port), 0);
         this.server.setExecutor(Executors.newCachedThreadPool());
@@ -252,6 +252,15 @@ public class TeeBoxServer {
     }
 
     private void handleAdminApi(HttpExchange exchange, String method, String path) throws IOException {
+        if ("GET".equals(method) && "/api/admin/system".equals(path)) {
+            SystemInfo info = runManager.getSystemInfo();
+            if (info == null) {
+                writeJson(exchange, HttpURLConnection.HTTP_INTERNAL_ERROR, errorMap("System info not available"));
+                return;
+            }
+            writeJson(exchange, HttpURLConnection.HTTP_OK, info);
+            return;
+        }
         if ("GET".equals(method) && "/api/admin/runs".equals(path)) {
             Map<String, String> query = parseQuery(exchange);
             String status = trimToNull(query.get("status"));

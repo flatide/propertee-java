@@ -73,6 +73,11 @@ public class AdminPageRenderer {
             sb.append("</div>");
         }
 
+        SystemInfo sysInfo = runManager.getSystemInfo();
+        if (sysInfo != null) {
+            sb.append(renderSystemInfoCard(sysInfo));
+        }
+
         sb.append("<div class='footer'>");
         sb.append("<span class='dim'>scriptsRoot: ").append(escape(config.scriptsRoot.getAbsolutePath())).append("</span><br/>");
         sb.append("<span class='dim'>dataDir: ").append(escape(config.dataDir.getAbsolutePath())).append("</span>");
@@ -223,6 +228,100 @@ public class AdminPageRenderer {
         return sb.toString();
     }
 
+    private String renderSystemInfoCard(SystemInfo info) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div class='card'>");
+        sb.append("<div class='card-header'><h2>System Info</h2>");
+        sb.append("<div class='card-actions'><a href='/api/admin/system' class='link-subtle'>JSON</a></div></div>");
+
+        sb.append("<div class='sys-section'><div class='sys-section-title'>JVM</div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Java</div><div class='detail-value'>").append(escape(info.javaVersion)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Vendor</div><div class='detail-value'>").append(escape(info.javaVendor)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>OS</div><div class='detail-value'>").append(escape(info.osName)).append(" ").append(escape(info.osArch)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>CPUs</div><div class='detail-value'>").append(info.availableProcessors).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Uptime</div><div class='detail-value'>").append(formatUptime(info.uptimeMs)).append("</div></div>");
+        sb.append("</div></div>");
+
+        sb.append("<div class='sys-section'><div class='sys-section-title'>Memory</div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Heap</div><div class='detail-value'>")
+            .append(formatBytes(info.heapUsed)).append(" / ").append(formatBytes(info.heapMax))
+            .append("</div>").append(renderUsageBar(info.heapUsed, info.heapMax)).append("</div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Non-Heap</div><div class='detail-value'>")
+            .append(formatBytes(info.nonHeapUsed)).append(" / ").append(formatBytes(info.nonHeapCommitted))
+            .append("</div></div>");
+        sb.append("</div></div>");
+
+        long diskUsed = info.diskTotal - info.diskFree;
+        sb.append("<div class='sys-section'><div class='sys-section-title'>Disk</div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Partition</div><div class='detail-value'>")
+            .append(formatBytes(diskUsed)).append(" used / ").append(formatBytes(info.diskTotal)).append(" total")
+            .append("</div>").append(renderUsageBar(diskUsed, info.diskTotal)).append("</div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Free</div><div class='detail-value'>")
+            .append(formatBytes(info.diskFree)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Usable</div><div class='detail-value'>")
+            .append(formatBytes(info.diskUsable)).append("</div></div>");
+        sb.append("</div></div>");
+
+        sb.append("<div class='sys-section'><div class='sys-section-title'>Data Directories</div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>runs/</div><div class='detail-value'>").append(formatBytes(info.runsDirSize)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>tasks/</div><div class='detail-value'>").append(formatBytes(info.tasksDirSize)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>script-registry/</div><div class='detail-value'>").append(formatBytes(info.scriptRegistryDirSize)).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Total</div><div class='detail-value'>").append(formatBytes(info.totalDataSize)).append("</div></div>");
+        sb.append("</div></div>");
+
+        sb.append("<div class='sys-section'><div class='sys-section-title'>Configuration</div>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>scriptsRoot</div><div class='detail-value'><code>").append(escape(info.scriptsRootPath)).append("</code></div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>dataDir</div><div class='detail-value'><code>").append(escape(info.dataDirPath)).append("</code></div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Bind</div><div class='detail-value'>").append(escape(info.bindAddress)).append(":").append(info.port).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Max Concurrent Runs</div><div class='detail-value'>").append(info.maxConcurrentRuns).append("</div></div>");
+        sb.append("</div></div>");
+
+        sb.append("</div>");
+        return sb.toString();
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024L * 1024) return String.format(Locale.ENGLISH, "%.1f KB", bytes / 1024.0);
+        if (bytes < 1024L * 1024 * 1024) return String.format(Locale.ENGLISH, "%.1f MB", bytes / (1024.0 * 1024));
+        return String.format(Locale.ENGLISH, "%.2f GB", bytes / (1024.0 * 1024 * 1024));
+    }
+
+    private String formatUptime(long ms) {
+        long secs = ms / 1000;
+        if (secs < 60) return secs + "s";
+        long mins = secs / 60;
+        secs = secs % 60;
+        if (mins < 60) return mins + "m " + secs + "s";
+        long hours = mins / 60;
+        mins = mins % 60;
+        if (hours < 24) return hours + "h " + mins + "m";
+        long days = hours / 24;
+        hours = hours % 24;
+        return days + "d " + hours + "h " + mins + "m";
+    }
+
+    private String renderUsageBar(long used, long total) {
+        if (total <= 0) return "";
+        double pct = (used * 100.0) / total;
+        if (pct > 100) pct = 100;
+        String color;
+        if (pct < 70) {
+            color = "#22c55e";
+        } else if (pct < 90) {
+            color = "#f59e0b";
+        } else {
+            color = "#ef4444";
+        }
+        return "<div style='margin-top:4px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;'>" +
+            "<div style='height:100%;width:" + String.format(Locale.ENGLISH, "%.1f", pct) + "%;background:" + color + ";border-radius:3px;'></div></div>";
+    }
+
     private String renderThreadTable(List<RunThreadInfo> threads) {
         if (threads.isEmpty()) {
             return "<p class='empty'>No threads</p>";
@@ -353,6 +452,8 @@ public class AdminPageRenderer {
         sb.append("font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;line-height:1.6;margin-bottom:16px;} ");
         sb.append("code{font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;");
         sb.append("background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px;} ");
+        sb.append(".sys-section{margin-bottom:16px;} .sys-section:last-child{margin-bottom:0;} ");
+        sb.append(".sys-section-title{font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #f1f5f9;} ");
         sb.append("</style></head><body>");
         return sb.toString();
     }

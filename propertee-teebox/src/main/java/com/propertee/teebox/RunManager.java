@@ -38,10 +38,15 @@ public class RunManager {
     private final TaskEngine taskEngine;
     private final ThreadPoolExecutor runExecutor;
     private final ScriptExecutor scriptExecutor;
+    private final SystemInfoCollector systemInfoCollector;
     private final ScheduledExecutorService maintenanceScheduler;
     private final java.util.concurrent.ConcurrentHashMap<String, Future<?>> activeRuns = new java.util.concurrent.ConcurrentHashMap<String, Future<?>>();
 
     public RunManager(File scriptsRoot, File dataDir, int maxConcurrentRuns) {
+        this(scriptsRoot, dataDir, maxConcurrentRuns, null);
+    }
+
+    public RunManager(File scriptsRoot, File dataDir, int maxConcurrentRuns, TeeBoxConfig teeBoxConfig) {
         this.scriptsRoot = scriptsRoot;
         this.dataDir = dataDir;
         if (!this.scriptsRoot.exists() || !this.scriptsRoot.isDirectory()) {
@@ -58,6 +63,7 @@ public class RunManager {
         this.taskEngine.init();
         this.taskEngine.archiveExpiredTasks();
         this.scriptExecutor = new ScriptExecutor();
+        this.systemInfoCollector = teeBoxConfig != null ? new SystemInfoCollector(teeBoxConfig) : null;
         this.runExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Math.max(1, maxConcurrentRuns));
         this.maintenanceScheduler = Executors.newSingleThreadScheduledExecutor();
         startMaintenanceScheduler();
@@ -180,6 +186,13 @@ public class RunManager {
 
     public int getActiveCount() {
         return runExecutor.getActiveCount();
+    }
+
+    public SystemInfo getSystemInfo() {
+        if (systemInfoCollector == null) {
+            return null;
+        }
+        return systemInfoCollector.collect();
     }
 
     public void shutdown() {
