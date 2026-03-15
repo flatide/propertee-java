@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is (v0.3.0)
+## What This Is (v0.4.0)
 
 ProperTee Java is a Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language. It uses ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** (replacing the JavaScript generator-based approach from [propertee-js](https://github.com/flatide/propertee-js)). Every statement visitor produces a Stepper object; a central scheduler round-robins between threads at statement boundaries.
 
@@ -12,9 +12,8 @@ Multi-module Gradle project with three subprojects:
 
 | Module | Contents | Depends On |
 |---|---|---|
-| `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, task engine, ANTLR grammar | — |
+| `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, TaskRunner, ANTLR grammar | — |
 | `propertee-cli` | CLI runner (`Main.java`) and interactive REPL (`Repl.java`) | `propertee-core` |
-| `propertee-teebox` | HTTP admin server (TeeBox) for remote script execution, run management, task monitoring | `propertee-core` |
 
 Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Grammar at `propertee-core/grammar/ProperTee.g4`. Tests at `propertee-core/src/test/`.
 
@@ -33,10 +32,6 @@ Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Gram
 ./gradlew jar7                    # Java 7 fat JAR → build/libs/propertee-java-java7.jar
 ./gradlew jar8                    # Java 8 fat JAR → build/libs/propertee-java-java8.jar
 ./gradlew jarAll                  # Both JARs
-
-# TeeBox server:
-./gradlew runTeeBox               # run TeeBox server (pass -D flags for config)
-./gradlew teeBoxZip               # build deployable zip → build/distributions/
 
 # Run a script via Gradle:
 ./gradlew :propertee-cli:run --args="sample/01_hello.pt"
@@ -80,7 +75,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
-**TaskEngine tests:** `TaskEngineTest.java` tests process lifecycle, archiving, index management, and kill/cancel behavior. These spawn real shell processes.
+**TaskRunner tests:** `TaskEngineTest.java` tests DefaultTaskRunner process lifecycle and kill/cancel behavior. These spawn real shell processes. Multi-instance and archival tests have been moved to TeeBox's ManagedTaskEngineTest.
 
 **Sample scripts:** `sample/01_hello.pt` through `sample/16_comments.pt` cover all language features.
 
@@ -129,7 +124,7 @@ interface Stepper {
 | `com.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
 | `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
 | `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
-| `com.propertee.task` | TaskEngine for detached process execution, TaskStatus enum, Task/TaskInfo/TaskObservation models |
+| `com.propertee.task` | TaskRunner interface, DefaultTaskRunner (lightweight in-memory), deprecated TaskEngine. Task/TaskInfo/TaskObservation models, TaskStatus enum |
 | `com.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
 
 **Application packages:**
@@ -137,7 +132,6 @@ interface Stepper {
 | Package | Module | Role |
 |---|---|---|
 | `com.propertee.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
-| `com.propertee.teebox` | `propertee-teebox` | TeeBox HTTP server, run management, script execution service, script registry |
 
 ### Key Files
 
@@ -145,7 +139,7 @@ interface Stepper {
 |---|---|
 | `propertee-core/grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn keys reuse the `access` rule (same as property access): `thread key:`, `thread "key":`, `thread 42:`, `thread $var:`, `thread $::var:`, `thread $(expr):`, `thread :` (unnamed). `arrayLiteral` has two alternatives: `RangeArray` (`[start..end]` or `[start..end, step]`) and `ListArray` (`[1, 2, 3]`). Object keys must be quoted strings or integers — bare identifiers are not allowed (`{"name": "Alice"}`, not `{name: "Alice"}`). |
 | `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `visitSpawnKeyStmt` resolves key from `access` context (StaticAccess, StringKeyAccess, ArrayAccess, VarEvalAccess, EvalAccess). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Integer keys on objects become string keys in `getProperty()`. `resolveAndValidateDynamicKey()` auto-coerces dynamic keys to string via `TO_STRING()` (empty treated as unnamed, no duplicates). |
-| `BuiltinFunctions.java` | 41 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, KEYS, SORT, SORT_DESC, SORT_BY, SORT_BY_DESC, REVERSE, RANDOM, MILTIME, DATE, TIME, SHELL, SHELL_CTX, START_TASK, TASK_STATUS, TASK_RESULT, WAIT_TASK, CANCEL_TASK, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for sync I/O, `registerExternalAsync()` for async I/O (blocking calls on thread pool). `SHELL` and task engine functions use `TaskEngine` for detached process execution. `SHELL_CTX(cwd[, env])` creates a context config (sync via `registerExternal`). `SHELL(cmd)` or `SHELL(ctx, cmd)` executes shell commands (async via `registerExternalAsync`). `SHELL` auto-unwraps Result from `SHELL_CTX` — pass the Result directly, not `.value`. `PrintFunction` interface takes `Object[]` args, not `String` |
+| `BuiltinFunctions.java` | 41 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, KEYS, SORT, SORT_DESC, SORT_BY, SORT_BY_DESC, REVERSE, RANDOM, MILTIME, DATE, TIME, SHELL, SHELL_CTX, START_TASK, TASK_STATUS, TASK_RESULT, WAIT_TASK, CANCEL_TASK, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for sync I/O, `registerExternalAsync()` for async I/O (blocking calls on thread pool). `SHELL` and task functions use `TaskRunner` interface (was `TaskEngine`, now lightweight). `SHELL_CTX(cwd[, env])` creates a context config (sync via `registerExternal`). `SHELL(cmd)` or `SHELL(ctx, cmd)` executes shell commands (async via `registerExternalAsync`). `SHELL` auto-unwraps Result from `SHELL_CTX` — pass the Result directly, not `.value`. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships, `resultCollection` (live map updated in-place by scheduler) |
 | `TypeChecker.java` | Runtime type checks, number formatting, value formatting |
@@ -283,88 +277,21 @@ BLOCKED → READY                    (async future completed or timed out)
 
 `BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: loops catch break/continue, function call steppers catch return, statement-level steppers (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper) catch `AsyncPendingException` and return `AWAIT_ASYNC` command for retry.
 
-## TeeBox Server Subsystem
+## TaskRunner (`com.propertee.task`)
 
-The TeeBox server (`propertee-teebox` module) provides an HTTP service for remote ProperTee script execution, designed for HPC environments. Evolution plan documented in `propertee-teebox/demo/teebox/PLAN.md`.
-
-### TeeBox Architecture
-
-```
-HTTP Request → TeeBoxServer
-                  ├── /api/client/*     — run submission and result polling
-                  ├── /api/publisher/*   — script registration and activation
-                  ├── /api/admin/*       — run/task inspection and control
-                  └── /admin/*           → AdminPageRenderer — HTML UI
-                            ↓
-                       RunManager (coordinator)
-                  ┌────────┴────────┐
-            ScriptExecutor    RunRegistry ←→ RunStore (disk)
-                  ↓                              ↓
-            ProperTeeInterpreter           runs/index.json
-            + Scheduler                    runs/{runId}.json
-                  ↓
-            TaskEngine ←→ tasks/index.json
-                              tasks/task-{id}/
-```
-
-### Key TeeBox Classes
+Manages detached shell processes for SHELL()/START_TASK() builtins.
 
 | Class | Role |
 |---|---|
-| `TeeBoxServer` | HTTP server (com.sun.net.httpserver). Namespaced API routes (`/api/client`, `/api/publisher`, `/api/admin`) and admin UI routes. Per-namespace Bearer token auth. |
-| `TeeBoxMain` | Process entry point for the TeeBox server. |
-| `TeeBoxClient` | Programmatic client for the TeeBox API. |
-| `RunManager` | Thin coordinator: submits runs to thread pool, delegates to ScriptExecutor and RunRegistry. Manages TaskEngine lifecycle. |
-| `ScriptExecutor` | Stateless script executor: parse → interpret → schedule → collect results. Returns `ExecutionResult` with `hasExplicitReturn` flag and `resultData`. |
-| `ScriptRegistry` | Script version management: register script versions, activate default version, lookup by scriptId. |
-| `RunRegistry` | In-memory run state cache (ConcurrentHashMap) backed by RunStore. Handles run lifecycle (QUEUED → RUNNING → COMPLETED/FAILED), log ring buffers (200 lines), archiving (24h retention → trim logs → 7d purge). On server restart, non-terminal runs marked `SERVER_RESTARTED`. |
-| `RunStore` | File-based persistence for RunInfo. Index-based pagination (`runs/index.json`) with atomic write via tmp+move. All public methods `synchronized`. |
-| `AdminPageRenderer` | HTML page generation for admin UI. |
-| `TeeBoxConfig` | Configuration via system properties (`propertee.teebox.*`): bind address, port, scriptsRoot, dataDir, maxConcurrentRuns, per-namespace API tokens. |
-| `TeeBoxUpstreamMockMain` | Mock upstream harness for testing the client/publisher API workflow. |
-
-### TaskEngine (`com.propertee.task`)
-
-Manages detached shell processes. Used by both SHELL()/START_TASK() builtins and the mock server.
-
-| Class | Role |
-|---|---|
-| `TaskEngine` | Launch processes via ProcessBuilder with `setsid`/`nohup`, monitor via `ps`, kill via signal escalation. Lock-free per-task execution (AtomicInteger IDs). Index-based queries (`tasks/index.json`). Two-phase archiving: retain 24h → archive (tail logs) → purge 7d. Exponential backoff polling (50ms→1000ms). |
+| `TaskRunner` | Interface: execute, getTask, waitForCompletion, killTask, observe, stdout/stderr/output, exitCode, statusMap, shutdown. Defines the eval/runtime contract for process execution. |
+| `DefaultTaskRunner` | Lightweight implementation: in-memory task tracking (ConcurrentHashMap), no disk persistence, no indexing, no archival. Used by CLI and as the default for embedders. |
+| `TaskEngine` | **Deprecated.** Original implementation with full persistence/indexing/archival. Now implements TaskRunner for backward compat. Will be removed in next major version. |
 | `TaskStatus` | Enum: STARTING, RUNNING, COMPLETED, FAILED, KILLED, DETACHED, LOST. `@SerializedName` for lowercase JSON compat. `isTransient()` for states that need recheck. |
-| `Task` | Persistent model: command, pid, pgid, status, exitCode, timeoutMs, hostInstanceId, archived flag, stdoutTail/stderrTail (archived only). |
+| `Task` | Model: command, pid, pgid, status, exitCode, timeoutMs, hostInstanceId, archived flag, stdoutTail/stderrTail. |
 | `TaskInfo` | DTO with computed fields: elapsedMs, timeoutExceeded, healthHints. |
-| `TaskObservation` | Snapshot from `observe()`: alive, elapsed, output timestamps, health hints (TIMEOUT_EXCEEDED, PROCESS_NOT_FOUND, IDENTITY_UNVERIFIED). |
+| `TaskObservation` | Snapshot from `observe()`: alive, elapsed, output timestamps, health hints. |
 
-### TeeBox API
-
-```bash
-# Run TeeBox server
-./gradlew runTeeBox \
-  -Dpropertee.teebox.scriptsRoot=./sample \
-  -Dpropertee.teebox.dataDir=/tmp/propertee-data \
-  -Dpropertee.teebox.apiToken=secret
-
-# API namespaces (Bearer token required if tokens configured)
-# Client API — run submission and result polling
-POST /api/client/runs                     # submit script execution
-GET  /api/client/runs/{runId}             # run status and result
-
-# Publisher API — script registration
-POST /api/publisher/scripts/{scriptId}/versions/{version}   # register script version
-POST /api/publisher/scripts/{scriptId}/activate/{version}   # activate version
-
-# Admin API — inspection and control
-GET  /api/admin/runs?status=RUNNING       # list runs (status, offset, limit)
-GET  /api/admin/runs/{runId}              # run detail (includes threads, tasks)
-GET  /api/admin/tasks?runId=xxx           # list tasks (runId, status, offset, limit)
-POST /api/admin/tasks/{taskId}/kill       # kill task
-```
-
-**Token configuration:**
-- `propertee.teebox.apiToken` — default fallback for all namespaces
-- `propertee.teebox.clientApiToken` — overrides for `/api/client` routes
-- `propertee.teebox.publisherApiToken` — overrides for `/api/publisher` routes
-- `propertee.teebox.adminApiToken` — overrides for `/api/admin` routes
+**Note:** Process management (persistence, multi-instance ownership, archival, restart recovery) has been moved to the separate [TeeBox](https://github.com/flatide/TeeBox) repository as `ManagedTaskEngine`. Core only provides lightweight process execution.
 
 ### Structured Results Contract
 
@@ -542,11 +469,11 @@ visitor.setIgnoredFunctions(ignored);
 - Division always produces `Double`
 - Semicolons are optional statement separators (treated as whitespace by the lexer)
 - **Syntax highlighting** — ProperTee repo has Vim (`editors/vim/syntax/propertee.vim`) and VS Code (`editors/vscode/syntaxes/propertee.tmLanguage.json`) syntax files. The playground (`propertee-js/docs/index.html`) has its own regex-based syntax highlighting via `highlightSyntax()` — update the `builtins` and `keywords` strings there when adding new built-in functions or keywords. Update all three locations when adding keywords or built-in functions.
-- **Index files** — both RunStore and TaskEngine use `index.json` with atomic write (tmp+move) for filtered pagination. TaskEngine uses `synchronized(indexLock)` for its index; RunStore uses `synchronized(this)` on all public methods.
+- **DefaultTaskRunner** — lightweight in-memory task tracking, no disk persistence. The deprecated `TaskEngine` retains index-based persistence for backward compat.
 
 ## CI / Releases
 
-GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts on tag push (e.g., `git tag v0.3.1 && git push origin v0.3.1`). Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`, `propertee-teebox-dist.zip`.
+GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts on tag push (e.g., `git tag v0.4.0 && git push origin v0.4.0`). Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
 
 ## Dependencies
 
