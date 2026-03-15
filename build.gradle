@@ -55,32 +55,6 @@ task dist(type: Copy) {
     group = 'build'
 }
 
-task runTeeBox {
-    dependsOn ':propertee-teebox:run'
-    description = 'Run the ProperTee TeeBox admin server'
-    group = 'application'
-}
-
-task runMockServer {
-    dependsOn runTeeBox
-    description = 'Deprecated alias for runTeeBox'
-    group = 'application'
-}
-
-task teeBoxZip(type: Copy) {
-    dependsOn ':propertee-teebox:teeBoxZip'
-    from { project(':propertee-teebox').tasks.getByName('teeBoxZip').archiveFile }
-    into "${buildDir}/distributions"
-    description = 'Build a deployable ProperTee TeeBox zip archive'
-    group = 'distribution'
-}
-
-task mockServerZip {
-    dependsOn teeBoxZip
-    description = 'Deprecated alias for teeBoxZip'
-    group = 'distribution'
-}
-
 task runAsyncDemo {
     dependsOn ':propertee-core:runAsyncDemo'
     description = 'Run async external functions demo'

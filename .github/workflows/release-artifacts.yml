@@ -26,14 +26,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build release artifacts
-        run: ./gradlew --no-daemon test jarAll teeBoxZip
+        run: ./gradlew --no-daemon test jarAll
 
       - name: Collect release files
         run: |
           mkdir -p release-assets
           cp build/libs/propertee-java-java7.jar release-assets/
           cp build/libs/propertee-java-java8.jar release-assets/
-          cp build/distributions/propertee-teebox-dist.zip release-assets/
 
       - name: Create or update GitHub release
         env:
