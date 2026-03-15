@@ -53,8 +53,12 @@ public class RunRegistry {
     }
 
     public List<RunInfo> listRuns(String status, int offset, int limit) {
+        return listRuns(status, null, offset, limit);
+    }
+
+    public List<RunInfo> listRuns(String status, String scriptId, int offset, int limit) {
         flushDirty();
-        List<RunInfo> loaded = runStore.query(status, offset, limit);
+        List<RunInfo> loaded = runStore.query(status, scriptId, offset, limit);
         List<RunInfo> copy = new ArrayList<RunInfo>();
         for (RunInfo run : loaded) {
             RunInfo current = runs.get(run.runId);

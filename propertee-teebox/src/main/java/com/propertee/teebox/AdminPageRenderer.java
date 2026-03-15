@@ -26,7 +26,8 @@ public class AdminPageRenderer {
         sb.append("<div class='header'><h1>TeeBox Admin</h1>");
         sb.append("<div class='header-meta'>");
         sb.append("<span class='tag'>active ").append(runManager.getActiveCount()).append("</span> ");
-        sb.append("<span class='tag'>queued ").append(runManager.getQueuedCount()).append("</span>");
+        sb.append("<span class='tag'>queued ").append(runManager.getQueuedCount()).append("</span> ");
+        sb.append("<a href='/admin/scripts' class='tag'>scripts ").append(runManager.listScripts().size()).append("</a>");
         sb.append("</div></div>");
 
         sb.append("<div class='card'>");
@@ -213,6 +214,141 @@ public class AdminPageRenderer {
         }
 
         sb.append(pageEnd(true));
+        return sb.toString();
+    }
+
+    public String renderScriptsPage() {
+        List<ScriptInfo> scripts = runManager.listScripts();
+        StringBuilder sb = new StringBuilder();
+        sb.append(pageStart("Scripts - TeeBox Admin"));
+
+        sb.append("<div class='nav'>");
+        sb.append("<a href='/admin'>Dashboard</a>");
+        sb.append("<span class='nav-sep'>/</span>");
+        sb.append("<span>Scripts</span>");
+        sb.append("<span class='nav-sep'>|</span>");
+        sb.append("<a href='/api/publisher/scripts' class='link-subtle'>JSON</a>");
+        sb.append("</div>");
+
+        sb.append("<div class='card'>");
+        sb.append("<div class='card-header'><h2>Registered Scripts (").append(scripts.size()).append(")</h2></div>");
+        if (scripts.isEmpty()) {
+            sb.append("<p class='empty'>No scripts registered</p>");
+        } else {
+            sb.append("<div class='table-wrap'><table><thead><tr>");
+            sb.append("<th>Script ID</th><th>Active Version</th><th>Versions</th><th>Created</th><th>Updated</th>");
+            sb.append("</tr></thead><tbody>");
+            for (ScriptInfo script : scripts) {
+                sb.append("<tr>");
+                sb.append("<td><a href='/admin/scripts/").append(urlPath(script.scriptId)).append("' class='mono'>").append(escape(script.scriptId)).append("</a></td>");
+                sb.append("<td>");
+                if (script.activeVersion != null && script.activeVersion.length() > 0) {
+                    sb.append(statusBadge(script.activeVersion));
+                } else {
+                    sb.append("<span class='dim'>&mdash;</span>");
+                }
+                sb.append("</td>");
+                sb.append("<td class='center'>").append(script.versions.size()).append("</td>");
+                sb.append("<td class='dim'>").append(escape(formatTime(script.createdAt))).append("</td>");
+                sb.append("<td class='dim'>").append(escape(formatTime(script.updatedAt))).append("</td>");
+                sb.append("</tr>");
+            }
+            sb.append("</tbody></table></div>");
+        }
+        sb.append("</div>");
+
+        sb.append(pageEnd());
+        return sb.toString();
+    }
+
+    public String renderScriptPage(String scriptId) {
+        ScriptInfo script = runManager.getScript(scriptId);
+        if (script == null) {
+            return renderErrorPage("Script not found", scriptId);
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(pageStart("Script " + scriptId));
+
+        sb.append("<div class='nav'>");
+        sb.append("<a href='/admin'>Dashboard</a>");
+        sb.append("<span class='nav-sep'>/</span>");
+        sb.append("<a href='/admin/scripts'>Scripts</a>");
+        sb.append("<span class='nav-sep'>/</span>");
+        sb.append("<span>").append(escape(scriptId)).append("</span>");
+        sb.append("<span class='nav-sep'>|</span>");
+        sb.append("<a href='/api/publisher/scripts/").append(urlPath(scriptId)).append("' class='link-subtle'>JSON</a>");
+        sb.append("</div>");
+
+        sb.append("<div class='card'>");
+        sb.append("<h2>").append(escape(scriptId)).append("</h2>");
+        sb.append("<div class='detail-grid'>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Script ID</div><div class='detail-value'><code>").append(escape(scriptId)).append("</code></div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Active Version</div><div class='detail-value'>");
+        if (script.activeVersion != null && script.activeVersion.length() > 0) {
+            sb.append(statusBadge(script.activeVersion));
+        } else {
+            sb.append("<span class='dim'>&mdash;</span>");
+        }
+        sb.append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Created</div><div class='detail-value dim'>").append(escape(formatTime(script.createdAt))).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Updated</div><div class='detail-value dim'>").append(escape(formatTime(script.updatedAt))).append("</div></div>");
+        sb.append("<div class='detail-item'><div class='detail-label'>Total Versions</div><div class='detail-value'>").append(script.versions.size()).append("</div></div>");
+        sb.append("</div></div>");
+
+        sb.append("<div class='card'>");
+        sb.append("<h2>Versions (").append(script.versions.size()).append(")</h2>");
+        if (script.versions.isEmpty()) {
+            sb.append("<p class='empty'>No versions</p>");
+        } else {
+            sb.append("<div class='table-wrap'><table><thead><tr>");
+            sb.append("<th>Version</th><th>Status</th><th>Description</th><th>Labels</th><th>SHA-256</th><th>Created</th>");
+            sb.append("</tr></thead><tbody>");
+            for (ScriptVersionInfo version : script.versions) {
+                sb.append("<tr>");
+                sb.append("<td class='mono'>").append(escape(version.version)).append("</td>");
+                sb.append("<td>");
+                if (version.active) {
+                    sb.append("<span class='badge badge-completed'>ACTIVE</span>");
+                } else {
+                    sb.append("<span class='dim'>&mdash;</span>");
+                }
+                sb.append("</td>");
+                sb.append("<td>").append(escape(version.description)).append("</td>");
+                sb.append("<td>");
+                if (version.labels != null && !version.labels.isEmpty()) {
+                    for (int i = 0; i < version.labels.size(); i++) {
+                        if (i > 0) sb.append(" ");
+                        sb.append("<span class='tag'>").append(escape(version.labels.get(i))).append("</span>");
+                    }
+                } else {
+                    sb.append("<span class='dim'>&mdash;</span>");
+                }
+                sb.append("</td>");
+                sb.append("<td class='mono dim'>");
+                if (version.sha256 != null && version.sha256.length() > 12) {
+                    sb.append(escape(version.sha256.substring(0, 12))).append("...");
+                } else {
+                    sb.append(escape(version.sha256));
+                }
+                sb.append("</td>");
+                sb.append("<td class='dim'>").append(escape(formatTime(version.createdAt))).append("</td>");
+                sb.append("</tr>");
+            }
+            sb.append("</tbody></table></div>");
+        }
+        sb.append("</div>");
+
+        if (script.activeVersion != null && script.activeVersion.length() > 0) {
+            String content = runManager.getScriptVersionContent(scriptId, script.activeVersion);
+            if (content != null && content.length() > 0) {
+                sb.append("<div class='card'>");
+                sb.append("<h2>Active Version Source (").append(escape(script.activeVersion)).append(")</h2>");
+                sb.append("<pre>").append(escape(content)).append("</pre>");
+                sb.append("</div>");
+            }
+        }
+
+        sb.append(pageEnd());
         return sb.toString();
     }
 

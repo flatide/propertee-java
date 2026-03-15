@@ -90,6 +90,15 @@ public class TeeBoxServer {
                     redirect(exchange, "/admin/runs/" + urlPath(run.runId));
                     return;
                 }
+                if ("GET".equals(method) && "/admin/scripts".equals(path)) {
+                    writeHtml(exchange, HttpURLConnection.HTTP_OK, pageRenderer.renderScriptsPage());
+                    return;
+                }
+                if ("GET".equals(method) && path.startsWith("/admin/scripts/")) {
+                    String scriptId = path.substring("/admin/scripts/".length());
+                    writeHtml(exchange, HttpURLConnection.HTTP_OK, pageRenderer.renderScriptPage(scriptId));
+                    return;
+                }
                 if ("GET".equals(method) && path.startsWith("/admin/runs/")) {
                     String suffix = path.substring("/admin/runs/".length());
                     if (suffix.endsWith("/kill-tasks")) {
@@ -248,6 +257,44 @@ public class TeeBoxServer {
             writeJson(exchange, HttpURLConnection.HTTP_OK, detail);
             return;
         }
+        if (path.startsWith("/api/client/scripts/")) {
+            handleClientScriptApi(exchange, method, path);
+            return;
+        }
+        writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
+    }
+
+    private void handleClientScriptApi(HttpExchange exchange, String method, String path) throws IOException {
+        // /api/client/scripts/{scriptId}/runs
+        String suffix = path.substring("/api/client/scripts/".length());
+        int slashIdx = suffix.indexOf('/');
+        if (slashIdx < 0) {
+            writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
+            return;
+        }
+        String scriptId = suffix.substring(0, slashIdx);
+        String rest = suffix.substring(slashIdx);
+        if ("/runs".equals(rest)) {
+            if ("POST".equals(method)) {
+                RunRequest request = parseScriptRunRequest(exchange, scriptId);
+                RunInfo run = runManager.submit(request);
+                writeJson(exchange, HttpURLConnection.HTTP_ACCEPTED, buildClientRunSummary(run));
+                return;
+            }
+            if ("GET".equals(method)) {
+                Map<String, String> query = parseQuery(exchange);
+                String status = trimToNull(query.get("status"));
+                int offset = parseInt(query.get("offset"), 0);
+                int limit = parseInt(query.get("limit"), -1);
+                List<RunInfo> runs = runManager.listRuns(status, scriptId, offset, limit);
+                List<Map<String, Object>> payload = new ArrayList<Map<String, Object>>();
+                for (RunInfo run : runs) {
+                    payload.add(buildClientRunSummary(run));
+                }
+                writeJson(exchange, HttpURLConnection.HTTP_OK, payload);
+                return;
+            }
+        }
         writeJson(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorMap("Not found"));
     }
 
@@ -395,10 +442,21 @@ public class TeeBoxServer {
         RunRequest request = new RunRequest();
         Object scriptPath = raw.get("scriptPath");
         request.scriptPath = scriptPath instanceof String ? ((String) scriptPath).trim() : null;
-        Object scriptId = raw.get("scriptId");
-        request.scriptId = scriptId instanceof String ? ((String) scriptId).trim() : null;
+        parseRunOptions(raw, request);
+        return request;
+    }
+
+    private RunRequest parseScriptRunRequest(HttpExchange exchange, String scriptId) throws IOException {
+        Map<String, Object> raw = parseJsonBody(exchange);
+        RunRequest request = new RunRequest();
+        request.scriptId = scriptId;
         Object version = raw.get("version");
         request.version = version instanceof String ? ((String) version).trim() : null;
+        parseRunOptions(raw, request);
+        return request;
+    }
+
+    private void parseRunOptions(Map<String, Object> raw, RunRequest request) {
         Object props = raw.get("props");
         if (props instanceof Map) {
             @SuppressWarnings("unchecked")
@@ -413,7 +471,6 @@ public class TeeBoxServer {
         if (warnLoops instanceof Boolean) {
             request.warnLoops = ((Boolean) warnLoops).booleanValue();
         }
-        return request;
     }
 
     private ScriptPublishRequest parseScriptPublishRequest(HttpExchange exchange) throws IOException {

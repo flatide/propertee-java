@@ -122,12 +122,20 @@ public class RunManager {
         return scriptRegistry.activateVersion(scriptId, version);
     }
 
+    public String getScriptVersionContent(String scriptId, String version) {
+        return scriptRegistry.readVersionContent(scriptId, version);
+    }
+
     public List<RunInfo> listRuns() {
         return listRuns(null, 0, -1);
     }
 
     public List<RunInfo> listRuns(String status, int offset, int limit) {
         return runRegistry.listRuns(status, offset, limit);
+    }
+
+    public List<RunInfo> listRuns(String status, String scriptId, int offset, int limit) {
+        return runRegistry.listRuns(status, scriptId, offset, limit);
     }
 
     public RunInfo getRun(String runId) {
@@ -316,9 +324,6 @@ public class RunManager {
     private ResolvedRunTarget resolveRunTarget(RunRequest request) {
         String scriptId = trimToNull(request != null ? request.scriptId : null);
         String scriptPath = trimToNull(request != null ? request.scriptPath : null);
-        if (scriptId != null && scriptPath != null) {
-            throw new IllegalArgumentException("Provide either scriptPath or scriptId/version, not both");
-        }
         if (scriptId != null) {
             ScriptRegistry.ResolvedScript resolved = scriptRegistry.resolve(scriptId, trimToNull(request.version));
             ResolvedRunTarget target = new ResolvedRunTarget();

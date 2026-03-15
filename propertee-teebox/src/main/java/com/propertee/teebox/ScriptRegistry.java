@@ -273,6 +273,22 @@ public class ScriptRegistry {
         return new File(scriptDir(scriptId), "script.json");
     }
 
+    public synchronized String readVersionContent(String scriptId, String version) {
+        File file = scriptVersionFile(scriptId, version);
+        if (!file.isFile()) {
+            return null;
+        }
+        InputStream input = null;
+        try {
+            input = new FileInputStream(file);
+            return readAll(input);
+        } catch (IOException e) {
+            return null;
+        } finally {
+            closeQuietly(input);
+        }
+    }
+
     private File scriptVersionFile(String scriptId, String version) {
         return new File(new File(scriptDir(scriptId), "versions"), version + ".pt");
     }

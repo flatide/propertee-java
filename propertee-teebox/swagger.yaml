@@ -58,7 +58,7 @@ paths:
 
     post:
       tags: [Client]
-      summary: Submit a script for execution
+      summary: Submit a script by file path
       operationId: clientSubmitRun
       security:
         - ClientToken: []
@@ -68,6 +68,56 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RunRequest'
+      responses:
+        '202':
+          description: Run accepted and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRunSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/client/scripts/{scriptId}/runs:
+    get:
+      tags: [Client]
+      summary: List runs for a registered script
+      operationId: clientListScriptRuns
+      security:
+        - ClientToken: []
+      parameters:
+        - $ref: '#/components/parameters/ScriptId'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Array of run summaries for the script
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClientRunSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Client]
+      summary: Submit a registered script for execution
+      operationId: clientSubmitScriptRun
+      security:
+        - ClientToken: []
+      parameters:
+        - $ref: '#/components/parameters/ScriptId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScriptRunRequest'
       responses:
         '202':
           description: Run accepted and queued
@@ -572,18 +622,34 @@ components:
 
     RunRequest:
       type: object
-      description: Request to submit a script for execution. Provide either `scriptPath` or `scriptId`/`version`, not both.
+      description: Request to submit a script by file path.
+      required: [scriptPath]
       properties:
         scriptPath:
           type: string
           description: Relative path to .pt script (under scriptsRoot)
           example: "01_hello.pt"
-        scriptId:
-          type: string
-          description: Registered script identifier (alternative to scriptPath)
+        props:
+          type: object
+          additionalProperties: true
+          description: Built-in properties passed to the script
+          example: {"width": 100, "name": "test"}
+        maxIterations:
+          type: integer
+          default: 1000
+          description: Maximum loop iterations before error/warning
+        warnLoops:
+          type: boolean
+          default: false
+          description: Warn instead of error on loop iteration limit
+
+    ScriptRunRequest:
+      type: object
+      description: Request to submit a registered script for execution. The scriptId comes from the URL path.
+      properties:
         version:
           type: string
-          description: Script version (used with scriptId; defaults to active version)
+          description: Script version (defaults to active version if omitted)
         props:
           type: object
           additionalProperties: true

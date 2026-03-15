@@ -81,12 +81,19 @@ public class RunStore {
     }
 
     public synchronized List<RunInfo> query(String status, int offset, int limit) {
+        return query(status, null, offset, limit);
+    }
+
+    public synchronized List<RunInfo> query(String status, String scriptId, int offset, int limit) {
         List<RunIndexEntry> entries = loadIndexEntries();
         List<RunInfo> runs = new ArrayList<RunInfo>();
         int safeOffset = offset < 0 ? 0 : offset;
         int matched = 0;
         for (RunIndexEntry entry : entries) {
             if (status != null && !status.equalsIgnoreCase(entry.status)) {
+                continue;
+            }
+            if (scriptId != null && !scriptId.equals(entry.scriptId)) {
                 continue;
             }
             if (matched++ < safeOffset) {
@@ -259,6 +266,7 @@ public class RunStore {
         long createdAt;
         Long endedAt;
         String scriptPath;
+        String scriptId;
 
         static RunIndexEntry fromRun(RunInfo run) {
             RunIndexEntry entry = new RunIndexEntry();
@@ -268,6 +276,7 @@ public class RunStore {
             entry.createdAt = run.createdAt;
             entry.endedAt = run.endedAt;
             entry.scriptPath = run.scriptPath;
+            entry.scriptId = run.scriptId;
             return entry;
         }
     }
