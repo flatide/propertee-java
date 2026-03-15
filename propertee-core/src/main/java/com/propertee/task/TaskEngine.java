@@ -31,7 +31,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class TaskEngine {
+@Deprecated
+public class TaskEngine implements TaskRunner {
     private static final long WAIT_POLL_INITIAL_MS = 50L;
     private static final long WAIT_POLL_MAX_MS = 1000L;
     private static final long TRACKED_PID_WAIT_MS = 500L;
@@ -325,6 +326,10 @@ public class TaskEngine {
         map.put("cwd", task.cwd);
         map.put("hostInstanceId", task.hostInstanceId);
         return map;
+    }
+
+    public void shutdown() {
+        // no-op: TaskEngine manages its own lifecycle
     }
 
     private void initCounter() {

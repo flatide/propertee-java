@@ -6,10 +6,11 @@ import com.propertee.runtime.Result;
 import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.ThreadContext;
 import com.propertee.stepper.SchedulerCommand;
+import com.propertee.task.DefaultTaskRunner;
 import com.propertee.task.Task;
-import com.propertee.task.TaskEngine;
 import com.propertee.task.TaskObservation;
 import com.propertee.task.TaskRequest;
+import com.propertee.task.TaskRunner;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -33,18 +34,18 @@ public class BuiltinFunctions {
     private ProperTeeInterpreter interpreter;
     private ExecutorService asyncExecutor;
     private boolean ownedExecutor = false;
-    private final TaskEngine taskEngine;
+    private final TaskRunner taskRunner;
     private final String runId;
 
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr) {
         this(stdout, stderr, null, null);
     }
 
-    public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr, String runId, TaskEngine taskEngine) {
+    public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr, String runId, TaskRunner taskRunner) {
         this.stdout = stdout;
         this.stderr = stderr;
         this.runId = runId != null ? runId : createRunId();
-        this.taskEngine = taskEngine != null ? taskEngine : createDefaultTaskEngine();
+        this.taskRunner = taskRunner != null ? taskRunner : createDefaultTaskRunner();
         registerDefaults();
     }
 
@@ -52,7 +53,11 @@ public class BuiltinFunctions {
     public PrintFunction getStdout() { return stdout; }
     public PrintFunction getStderr() { return stderr; }
     public String getRunId() { return runId; }
-    public TaskEngine getTaskEngine() { return taskEngine; }
+    public TaskRunner getTaskRunner() { return taskRunner; }
+
+    /** @deprecated Use getTaskRunner() */
+    @Deprecated
+    public TaskRunner getTaskEngine() { return taskRunner; }
 
     private void registerDefaults() {
         functions.put("PRINT", new BuiltinFunction() {
@@ -527,7 +532,7 @@ public class BuiltinFunctions {
             @SuppressWarnings("unchecked")
             public Object call(List<Object> args) {
                 TaskRequest request = buildTaskRequestFromStartTaskArgs(args);
-                Task task = taskEngine.execute(request);
+                Task task = taskRunner.execute(request);
                 return task.taskId;
             }
         });
@@ -539,7 +544,7 @@ public class BuiltinFunctions {
                     return Result.error("TASK_STATUS() requires a task id string");
                 }
 
-                Map<String, Object> status = taskEngine.getStatusMap((String) args.get(0));
+                Map<String, Object> status = taskRunner.getStatusMap((String) args.get(0));
                 if (status == null) {
                     return Result.error("Unknown task: " + args.get(0));
                 }
@@ -554,7 +559,7 @@ public class BuiltinFunctions {
                     return Result.error("TASK_RESULT() requires a task id string");
                 }
 
-                Task task = taskEngine.getTask((String) args.get(0));
+                Task task = taskRunner.getTask((String) args.get(0));
                 if (task == null) {
                     return Result.error("Unknown task: " + args.get(0));
                 }
@@ -579,7 +584,7 @@ public class BuiltinFunctions {
                 }
 
                 try {
-                    Task task = taskEngine.waitForCompletion(taskId, timeoutMs);
+                    Task task = taskRunner.waitForCompletion(taskId, timeoutMs);
                     if (task == null) {
                         return Result.error("Unknown task: " + taskId);
                     }
@@ -600,7 +605,7 @@ public class BuiltinFunctions {
                 if (args.isEmpty() || !(args.get(0) instanceof String)) {
                     return Result.error("CANCEL_TASK() requires a task id string");
                 }
-                return taskEngine.killTask((String) args.get(0));
+                return taskRunner.killTask((String) args.get(0));
             }
         });
 
@@ -613,10 +618,10 @@ public class BuiltinFunctions {
                 }
 
                 TaskRequest request = buildTaskRequestFromShellArgs(args);
-                Task task = taskEngine.execute(request);
+                Task task = taskRunner.execute(request);
 
                 try {
-                    Task completed = taskEngine.waitForCompletion(task.taskId, 0);
+                    Task completed = taskRunner.waitForCompletion(task.taskId, 0);
                     if (completed == null) {
                         return Result.error("Unknown task: " + task.taskId);
                     }
@@ -723,14 +728,12 @@ public class BuiltinFunctions {
         }
     }
 
-    private static TaskEngine createDefaultTaskEngine() {
+    private static TaskRunner createDefaultTaskRunner() {
         String baseDir = System.getProperty("propertee.task.baseDir");
         if (baseDir == null || baseDir.trim().length() == 0) {
             baseDir = new File(System.getProperty("java.io.tmpdir"), "propertee-java-task-engine").getAbsolutePath();
         }
-        String hostId = "cli-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(new Date()) +
-            "-" + Integer.toHexString((int) (System.nanoTime() & 0xffff));
-        return new TaskEngine(baseDir, hostId);
+        return new DefaultTaskRunner(baseDir);
     }
 
     private static String createRunId() {
@@ -842,7 +845,7 @@ public class BuiltinFunctions {
     }
 
     private Object buildTaskResult(Task task) {
-        TaskObservation observation = taskEngine.observe(task.taskId);
+        TaskObservation observation = taskRunner.observe(task.taskId);
         if (observation == null) {
             return Result.error("Unknown task: " + task.taskId);
         }
@@ -850,8 +853,8 @@ public class BuiltinFunctions {
             return Result.running();
         }
 
-        String output = normalizeOutput(taskEngine.getCombinedOutput(task.taskId));
-        Integer exitCode = taskEngine.getExitCode(task.taskId);
+        String output = normalizeOutput(taskRunner.getCombinedOutput(task.taskId));
+        Integer exitCode = taskRunner.getExitCode(task.taskId);
         if (exitCode != null && exitCode.intValue() == 0) {
             return Result.ok(output);
         }
