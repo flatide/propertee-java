@@ -1,31 +1,38 @@
-// Test 78: START_TASK / WAIT_TASK / TASK_STATUS / TASK_RESULT
+// Test 78: SHELL with timeout and options support
 
-taskId = START_TASK("sleep 1; echo started_task")
-status1 = TASK_STATUS(taskId)
-
-if status1.alive == true and status1.status == "running" then
-    PRINT("PASS running")
+// 1. SHELL_CTX with timeout (3rd arg)
+ctx = SHELL_CTX("/", {}, 5000)
+if ctx.ok == true then
+    r = SHELL(ctx, "echo ctx_timeout")
+    if r.ok == true then
+        PRINT("PASS ctx timeout:", r.value)
+    else
+        PRINT("FAIL ctx timeout")
+    end
 else
-    PRINT("FAIL running:", status1.status, status1.alive)
+    PRINT("FAIL ctx timeout setup")
 end
 
-waitResult = WAIT_TASK(taskId, 5000)
-if waitResult.ok == true then
-    PRINT("PASS wait:", waitResult.value)
+// 2. SHELL with options map (command, {timeout: ms})
+r = SHELL("echo options_timeout", {"timeout": 5000})
+if r.ok == true then
+    PRINT("PASS options:", r.value)
 else
-    PRINT("FAIL wait:", waitResult.value)
+    PRINT("FAIL options")
 end
 
-status2 = TASK_STATUS(taskId)
-if status2.status == "completed" and status2.alive == false then
-    PRINT("PASS completed")
-else
-    PRINT("FAIL completed:", status2.status, status2.alive)
+// 3. SHELL in multi/thread (replaces START_TASK + WAIT_TASK pattern)
+function worker(name) do
+    return SHELL("echo " + name)
 end
 
-result2 = TASK_RESULT(taskId)
-if result2.ok == true then
-    PRINT("PASS result:", result2.value)
+multi result do
+    thread alpha: worker("alpha")
+    thread beta: worker("beta")
+end
+
+if result.alpha.ok == true and result.beta.ok == true then
+    PRINT("PASS multi:", result.alpha.value.value, result.beta.value.value)
 else
-    PRINT("FAIL result:", result2.value)
+    PRINT("FAIL multi")
 end

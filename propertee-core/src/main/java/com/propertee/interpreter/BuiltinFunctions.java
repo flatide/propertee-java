@@ -36,6 +36,8 @@ public class BuiltinFunctions {
     private boolean ownedExecutor = false;
     private final TaskRunner taskRunner;
     private final String runId;
+    private static final ThreadLocal<Integer> asyncOriginThreadId = new ThreadLocal<Integer>();
+    private static final ThreadLocal<String> asyncOriginThreadName = new ThreadLocal<String>();
 
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr) {
         this(stdout, stderr, null, null);
@@ -523,89 +525,14 @@ public class BuiltinFunctions {
                 Map<String, Object> ctx = new LinkedHashMap<String, Object>();
                 ctx.put("cwd", cwd);
                 ctx.put("env", envMap);
+                if (args.size() >= 3) {
+                    Object timeoutArg = args.get(2);
+                    if (!TypeChecker.isNumber(timeoutArg)) {
+                        return com.propertee.runtime.Result.error("SHELL_CTX() third argument must be a number (timeout ms)");
+                    }
+                    ctx.put("timeout", timeoutArg);
+                }
                 return com.propertee.runtime.Result.ok(ctx);
-            }
-        });
-
-        registerExternalAsync("START_TASK", new BuiltinFunction() {
-            @Override
-            @SuppressWarnings("unchecked")
-            public Object call(List<Object> args) {
-                TaskRequest request = buildTaskRequestFromStartTaskArgs(args);
-                Task task = taskRunner.execute(request);
-                return task.taskId;
-            }
-        });
-
-        registerExternal("TASK_STATUS", new BuiltinFunction() {
-            @Override
-            public Object call(List<Object> args) {
-                if (args.isEmpty() || !(args.get(0) instanceof String)) {
-                    return Result.error("TASK_STATUS() requires a task id string");
-                }
-
-                Map<String, Object> status = taskRunner.getStatusMap((String) args.get(0));
-                if (status == null) {
-                    return Result.error("Unknown task: " + args.get(0));
-                }
-                return status;
-            }
-        });
-
-        registerExternal("TASK_RESULT", new BuiltinFunction() {
-            @Override
-            public Object call(List<Object> args) {
-                if (args.isEmpty() || !(args.get(0) instanceof String)) {
-                    return Result.error("TASK_RESULT() requires a task id string");
-                }
-
-                Task task = taskRunner.getTask((String) args.get(0));
-                if (task == null) {
-                    return Result.error("Unknown task: " + args.get(0));
-                }
-                return buildTaskResult(task);
-            }
-        });
-
-        registerExternalAsync("WAIT_TASK", new BuiltinFunction() {
-            @Override
-            public Object call(List<Object> args) {
-                if (args.isEmpty() || !(args.get(0) instanceof String)) {
-                    return Result.error("WAIT_TASK() requires a task id string");
-                }
-
-                String taskId = (String) args.get(0);
-                long timeoutMs = 0L;
-                if (args.size() >= 2) {
-                    if (!TypeChecker.isNumber(args.get(1))) {
-                        return Result.error("WAIT_TASK() second argument must be a number (timeout ms)");
-                    }
-                    timeoutMs = (long) TypeChecker.toDouble(args.get(1));
-                }
-
-                try {
-                    Task task = taskRunner.waitForCompletion(taskId, timeoutMs);
-                    if (task == null) {
-                        return Result.error("Unknown task: " + taskId);
-                    }
-                    if (task.alive) {
-                        return Result.error("timeout");
-                    }
-                    return buildTaskResult(task);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return Result.error("interrupted");
-                }
-            }
-        });
-
-        registerExternal("CANCEL_TASK", new BuiltinFunction() {
-            @Override
-            public Object call(List<Object> args) {
-                if (args.isEmpty() || !(args.get(0) instanceof String)) {
-                    return Result.error("CANCEL_TASK() requires a task id string");
-                }
-                return taskRunner.killTask((String) args.get(0));
             }
         });
 
@@ -754,8 +681,19 @@ public class BuiltinFunctions {
             return request;
         }
 
+        // SHELL(command, options) — command is String, options is Map with timeout/env/cwd
+        if (args.get(0) instanceof String) {
+            request.command = (String) args.get(0);
+            if (!(args.get(1) instanceof Map)) {
+                throw new ProperTeeError("SHELL() second argument must be an options object (e.g. {\"timeout\": 5000})");
+            }
+            applyContextToRequest((Map<String, Object>) args.get(1), request, "SHELL");
+            return request;
+        }
+
+        // SHELL(ctx, command) — ctx is Map from SHELL_CTX(), command is String
         if (!(args.get(0) instanceof Map)) {
-            throw new ProperTeeError("SHELL() first argument must be a context object from SHELL_CTX()");
+            throw new ProperTeeError("SHELL() first argument must be a string command or context object from SHELL_CTX()");
         }
         Map<String, Object> ctx = unwrapContextMap((Map<String, Object>) args.get(0), "SHELL");
         if (!(args.get(1) instanceof String)) {
@@ -767,31 +705,15 @@ public class BuiltinFunctions {
         return request;
     }
 
-    @SuppressWarnings("unchecked")
-    private TaskRequest buildTaskRequestFromStartTaskArgs(List<Object> args) {
-        if (args.isEmpty()) {
-            throw new ProperTeeError("START_TASK() requires at least 1 argument");
-        }
-        if (!(args.get(0) instanceof String)) {
-            throw new ProperTeeError("START_TASK() first argument must be a string command");
-        }
-
-        TaskRequest request = createBaseTaskRequest();
-        request.command = (String) args.get(0);
-
-        if (args.size() >= 2) {
-            if (!(args.get(1) instanceof Map)) {
-                throw new ProperTeeError("START_TASK() second argument must be an object");
-            }
-            applyContextToRequest((Map<String, Object>) args.get(1), request, "START_TASK");
-        }
-        return request;
-    }
-
     private TaskRequest createBaseTaskRequest() {
         TaskRequest request = new TaskRequest();
         request.runId = runId;
-        if (interpreter != null && interpreter.activeThread != null) {
+        Integer originId = asyncOriginThreadId.get();
+        String originName = asyncOriginThreadName.get();
+        if (originId != null) {
+            request.threadId = originId;
+            request.threadName = originName;
+        } else if (interpreter != null && interpreter.activeThread != null) {
             request.threadId = Integer.valueOf(interpreter.activeThread.id);
             request.threadName = interpreter.activeThread.name;
         }
@@ -913,15 +835,24 @@ public class BuiltinFunctions {
                     safeCopyArgs.add(TypeChecker.deepCopy(arg));
                 }
 
+                // Capture thread info on scheduler thread for use in executor
+                final Integer originThreadId = Integer.valueOf(thread.id);
+                final String originThreadName = thread.name;
+
                 // Submit to executor
                 ExecutorService executor = getOrCreateAsyncExecutor();
                 Future<Object> future = executor.submit(new Callable<Object>() {
                     @Override
                     public Object call() throws Exception {
+                        asyncOriginThreadId.set(originThreadId);
+                        asyncOriginThreadName.set(originThreadName);
                         try {
                             return func.call(safeCopyArgs);
                         } catch (Exception e) {
                             return com.propertee.runtime.Result.error(e.getMessage());
+                        } finally {
+                            asyncOriginThreadId.remove();
+                            asyncOriginThreadName.remove();
                         }
                     }
                 });

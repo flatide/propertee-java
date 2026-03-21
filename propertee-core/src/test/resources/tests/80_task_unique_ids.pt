@@ -1,18 +1,25 @@
-// Test 80: START_TASK should not reuse async cache entries for identical commands
+// Test 80: SHELL in multi/thread produces distinct results
 
-ids = [START_TASK("sleep 1; echo same"), START_TASK("sleep 1; echo same")]
-
-if ids.1 != ids.2 then
-    PRINT("PASS unique ids")
-else
-    PRINT("FAIL unique ids")
+function run(name) do
+    return SHELL("echo " + name)
 end
 
-r1 = WAIT_TASK(ids.1, 5000)
-r2 = WAIT_TASK(ids.2, 5000)
+multi result do
+    thread a: run("first")
+    thread b: run("second")
+end
 
-if r1.ok == true and r2.ok == true then
-    PRINT("PASS both done")
+aOk = result.a.ok == true
+bOk = result.b.ok == true
+
+if aOk and bOk then
+    aVal = result.a.value.value
+    bVal = result.b.value.value
+    if aVal == "first" and bVal == "second" then
+        PRINT("PASS distinct outputs")
+    else
+        PRINT("FAIL distinct outputs:", aVal, bVal)
+    end
 else
-    PRINT("FAIL both done")
+    PRINT("FAIL multi shell")
 end
