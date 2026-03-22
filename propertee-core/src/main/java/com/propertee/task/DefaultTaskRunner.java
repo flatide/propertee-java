@@ -434,27 +434,49 @@ public class DefaultTaskRunner implements TaskRunner {
     }
 
     private void terminateTask(Task task) {
-        // Only kill the full process group when the task owns its group.
+        // Prefer process group kill — atomic, no race between child processes.
         if (task.pgid > 0 && task.pgid == task.pid) {
-            sendSignalToGroup(task.pgid, "TERM");
+            sendSignalToGroup(task.pgid, "KILL");
             waitForExit(task, 1000L);
-            if (isProcessAlive(task.pid)) {
-                sendSignalToGroup(task.pgid, "KILL");
-                waitForExit(task, 1000L);
-            }
             return;
         }
 
-        List<Integer> descendants = listDescendantPids(task.pid);
-        sendSignal(task.pid, "KILL");
-        for (int i = descendants.size() - 1; i >= 0; i--) {
-            sendSignal(descendants.get(i).intValue(), "KILL");
-        }
-        waitForExit(task, 500L);
-        if (isProcessAlive(task.pid)) {
-            sendSignal(task.pid, "KILL");
-        }
+        // Fallback: collect all PIDs and kill in a single command to minimise race window.
+        List<Integer> allPids = new ArrayList<Integer>();
+        allPids.add(Integer.valueOf(task.pid));
+        allPids.addAll(listDescendantPids(task.pid));
+        sendSignalToAll(allPids, "KILL");
         waitForExit(task, 1000L);
+        if (isProcessAlive(task.pid)) {
+            allPids = new ArrayList<Integer>();
+            allPids.add(Integer.valueOf(task.pid));
+            allPids.addAll(listDescendantPids(task.pid));
+            sendSignalToAll(allPids, "KILL");
+            waitForExit(task, 1000L);
+        }
+    }
+
+    private void sendSignalToAll(List<Integer> pids, String signal) {
+        if (pids.isEmpty()) return;
+        List<String> args = new ArrayList<String>();
+        args.add("kill");
+        args.add("-" + signal);
+        for (Integer pid : pids) {
+            args.add(String.valueOf(pid));
+        }
+        Process process = null;
+        try {
+            process = new ProcessBuilder(args).start();
+            process.waitFor();
+        } catch (Exception e) {
+            // ignore best-effort kill
+        } finally {
+            if (process != null) {
+                closeQuietly(process.getInputStream());
+                closeQuietly(process.getErrorStream());
+                closeQuietly(process.getOutputStream());
+            }
+        }
     }
 
     private void waitForExit(Task task, long timeoutMs) {
