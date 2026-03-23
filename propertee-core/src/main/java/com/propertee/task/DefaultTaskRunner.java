@@ -308,10 +308,14 @@ public class DefaultTaskRunner implements TaskRunner {
     private void writeCommandFiles(Task task, TaskRequest request) {
         StringBuilder command = new StringBuilder();
         command.append("#!/bin/sh\n");
+        command.append("set -m\n");
         if (request.mergeErrorToStdout) {
             command.append(": > ").append(shellQuote(task.stderrFile.getAbsolutePath())).append("\n");
         }
-        command.append(request.command).append("\n");
+        command.append("( ").append(request.command).append(" ) &\n");
+        command.append("_CHILD_PID=$!\n");
+        command.append("trap 'kill -- -$_CHILD_PID 2>/dev/null; wait $_CHILD_PID 2>/dev/null; exit 143' TERM INT HUP\n");
+        command.append("wait $_CHILD_PID\n");
         command.append("status=$?\n");
         command.append("printf '%s\\n' \"$status\" > ").append(shellQuote(task.exitCodeFile.getAbsolutePath())).append("\n");
         command.append("exit \"$status\"\n");
