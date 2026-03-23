@@ -29,13 +29,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class DefaultTaskRunner implements TaskRunner {
     private static final long WAIT_POLL_INITIAL_MS = 50L;
     private static final long WAIT_POLL_MAX_MS = 1000L;
-    private static final long TRACKED_PID_WAIT_MS = 500L;
     private static final long START_READY_WAIT_MS = 2000L;
 
     private final File taskBaseDir;
     private final File tasksDir;
     private final AtomicInteger taskCounter = new AtomicInteger(0);
     private final String taskIdPrefix;
+    private final boolean setsidAvailable;
     private final ConcurrentHashMap<String, Task> tasks = new ConcurrentHashMap<String, Task>();
 
     public DefaultTaskRunner(String baseDir) {
@@ -46,6 +46,23 @@ public class DefaultTaskRunner implements TaskRunner {
         }
         this.taskIdPrefix = "t" + new SimpleDateFormat("yyyyMMddHHmmssSSS", Locale.ENGLISH).format(new Date())
                 + Integer.toHexString((int) (System.nanoTime() & 0xffff));
+        this.setsidAvailable = checkSetsidAvailable();
+    }
+
+    private static boolean checkSetsidAvailable() {
+        Process p = null;
+        try {
+            p = new ProcessBuilder("/bin/sh", "-c", "command -v setsid").start();
+            return p.waitFor() == 0;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (p != null) {
+                try { p.getInputStream().close(); } catch (IOException ignore) {}
+                try { p.getErrorStream().close(); } catch (IOException ignore) {}
+                try { p.getOutputStream().close(); } catch (IOException ignore) {}
+            }
+        }
     }
 
     public Task execute(TaskRequest request) {
@@ -75,8 +92,7 @@ public class DefaultTaskRunner implements TaskRunner {
         task.cwd = request.cwd;
         task.bindFiles(taskDir);
         writeCommandFiles(task, request);
-        int launcherPid = launchDetached(task, request);
-        task.pid = resolveTrackedPid(task, launcherPid);
+        task.pid = launchDetached(task, request);
         task.pgid = getProcessGroupId(task.pid);
         task.status = TaskStatus.RUNNING;
         awaitStartReady(task);
@@ -308,14 +324,10 @@ public class DefaultTaskRunner implements TaskRunner {
     private void writeCommandFiles(Task task, TaskRequest request) {
         StringBuilder command = new StringBuilder();
         command.append("#!/bin/sh\n");
-        command.append("set -m\n");
         if (request.mergeErrorToStdout) {
             command.append(": > ").append(shellQuote(task.stderrFile.getAbsolutePath())).append("\n");
         }
-        command.append("( ").append(request.command).append(" ) &\n");
-        command.append("_CHILD_PID=$!\n");
-        command.append("trap 'kill -- -$_CHILD_PID 2>/dev/null; wait $_CHILD_PID 2>/dev/null; exit 143' TERM INT HUP\n");
-        command.append("wait $_CHILD_PID\n");
+        command.append(request.command).append("\n");
         command.append("status=$?\n");
         command.append("printf '%s\\n' \"$status\" > ").append(shellQuote(task.exitCodeFile.getAbsolutePath())).append("\n");
         command.append("exit \"$status\"\n");
@@ -326,32 +338,30 @@ public class DefaultTaskRunner implements TaskRunner {
     private int launchDetached(Task task, TaskRequest request) {
         Process process = null;
         try {
-            StringBuilder wrapped = new StringBuilder();
-            wrapped.append("nohup /bin/sh ").append(shellQuote(task.commandFile.getAbsolutePath()));
-            wrapped.append(" > ").append(shellQuote(task.stdoutFile.getAbsolutePath()));
-            if (request.mergeErrorToStdout) {
-                wrapped.append(" 2>&1");
-            } else {
-                wrapped.append(" 2> ").append(shellQuote(task.stderrFile.getAbsolutePath()));
+            List<String> cmd = new ArrayList<String>();
+            if (setsidAvailable) {
+                cmd.add("setsid");
             }
-            wrapped.append(" & child=$!; ");
-            wrapped.append("printf '%s\\n' \"$child\" > ").append(shellQuote(task.commandPidFile.getAbsolutePath()));
-            wrapped.append("; echo $child");
-            ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", wrapped.toString());
+            cmd.add("/bin/sh");
+            cmd.add(task.commandFile.getAbsolutePath());
+            ProcessBuilder pb = new ProcessBuilder(cmd);
             if (request.cwd != null && request.cwd.length() > 0) {
                 pb.directory(new File(request.cwd));
             }
             if (request.env != null && !request.env.isEmpty()) {
                 pb.environment().putAll(request.env);
             }
+            pb.redirectOutput(task.stdoutFile);
+            if (request.mergeErrorToStdout) {
+                pb.redirectErrorStream(true);
+            } else {
+                pb.redirectError(task.stderrFile);
+            }
 
             process = pb.start();
-            String output = readStream(process.getInputStream()).trim();
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                throw new RuntimeException("Failed to launch detached task");
-            }
-            return Integer.parseInt(output);
+            int pid = (int) process.pid();
+            writeFile(task.commandPidFile, pid + "\n");
+            return pid;
         } catch (Exception e) {
             throw new RuntimeException("Failed to launch task: " + e.getMessage(), e);
         } finally {
@@ -363,28 +373,6 @@ public class DefaultTaskRunner implements TaskRunner {
         }
     }
 
-    private int resolveTrackedPid(Task task, int launcherPid) {
-        long start = System.currentTimeMillis();
-        while ((System.currentTimeMillis() - start) < TRACKED_PID_WAIT_MS) {
-            Integer commandPid = readCommandPid(task);
-            if (commandPid != null && commandPid.intValue() > 0) {
-                return commandPid.intValue();
-            }
-            try {
-                Thread.sleep(25L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-
-        Integer commandPid = readCommandPid(task);
-        if (commandPid != null && commandPid.intValue() > 0) {
-            return commandPid.intValue();
-        }
-
-        return launcherPid;
-    }
 
     private Integer readCommandPid(Task task) {
         if (!task.commandPidFile.exists()) return null;
@@ -442,7 +430,7 @@ public class DefaultTaskRunner implements TaskRunner {
         if (task.pgid > 0 && task.pgid == task.pid) {
             sendSignalToGroup(task.pgid, "KILL");
             waitForExit(task, 1000L);
-            return;
+            if (!isProcessAlive(task.pid)) return;
         }
 
         // Fallback: collect all PIDs and kill in a single command to minimise race window.
@@ -562,7 +550,7 @@ public class DefaultTaskRunner implements TaskRunner {
     private void sendSignalToGroup(int pgid, String signal) {
         Process process = null;
         try {
-            process = new ProcessBuilder("kill", "-" + signal, "-" + pgid).start();
+            process = new ProcessBuilder("kill", "-" + signal, "--", "-" + pgid).start();
             process.waitFor();
         } catch (Exception e) {
             // ignore best-effort kill
