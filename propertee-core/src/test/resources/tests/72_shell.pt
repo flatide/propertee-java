@@ -1,35 +1,37 @@
-// Test 72: SHELL and SHELL_CTX built-in functions
+// Test 72: SHELL and SHELL_CTX require a host-provided TaskRunner in core-only mode
 
-// 1. One-off command
+expected = "SHELL() requires a host-provided TaskRunner in this environment"
+
+// 1. One-off command should fail clearly
 r = SHELL("echo hello")
-if r.ok == true then
-    PRINT("PASS one-off:", r.value)
+if r.ok == false and r.value == expected then
+    PRINT("PASS one-off unsupported")
 else
     PRINT("FAIL one-off")
 end
 
-// 2. Pipe command
+// 2. Pipe command should fail clearly
 r = SHELL("echo 'c b a' | tr ' ' '\n' | sort")
-if r.ok == true then
-    PRINT("PASS pipe:", r.value)
+if r.ok == false and r.value == expected then
+    PRINT("PASS pipe unsupported")
 else
     PRINT("FAIL pipe")
 end
 
-// 3. Non-zero exit
+// 3. Explicit shell failure still reports unsupported runner first
 r = SHELL("exit 1")
-if r.ok == false then
-    PRINT("PASS error exit")
+if r.ok == false and r.value == expected then
+    PRINT("PASS unsupported exit")
 else
-    PRINT("FAIL error exit")
+    PRINT("FAIL unsupported exit")
 end
 
-// 4. Context with cwd — use / which is never a symlink
+// 4. Context creation still works, execution still fails
 ctx = SHELL_CTX("/")
 if ctx.ok == true then
     r = SHELL(ctx, "pwd")
-    if r.ok == true then
-        PRINT("PASS cwd:", r.value)
+    if r.ok == false and r.value == expected then
+        PRINT("PASS cwd unsupported")
     else
         PRINT("FAIL cwd cmd")
     end
@@ -37,12 +39,12 @@ else
     PRINT("FAIL ctx")
 end
 
-// 5. Context with env vars
+// 5. Context with env vars still validates and fails on execute
 ctx = SHELL_CTX("/", {"PT_TEST_VAR": "yes"})
 if ctx.ok == true then
     r = SHELL(ctx, "echo $PT_TEST_VAR")
-    if r.ok == true then
-        PRINT("PASS env:", r.value)
+    if r.ok == false and r.value == expected then
+        PRINT("PASS env unsupported")
     else
         PRINT("FAIL env cmd")
     end
@@ -72,17 +74,20 @@ multi result do
     thread b: shellB()
 end
 
-// result.a = {status: "done", ok: true, value: {status: "done", ok: true, value: "thread_a"}}
-if result.a.ok == true then
+if result.a.ok == true and result.a.value.ok == false then
     aVal = result.a.value.value
 else
     aVal = "error"
 end
 
-if result.b.ok == true then
+if result.b.ok == true and result.b.value.ok == false then
     bVal = result.b.value.value
 else
     bVal = "error"
 end
 
-PRINT("PASS multi:", aVal, bVal)
+if aVal == expected and bVal == expected then
+    PRINT("PASS multi unsupported")
+else
+    PRINT("FAIL multi")
+end

@@ -1,0 +1,67 @@
+package com.propertee.task;
+
+import java.util.Map;
+
+/**
+ * Default TaskRunner used when a host application does not provide external
+ * process execution support.
+ */
+public class UnsupportedTaskRunner implements TaskRunner {
+    private static final String MESSAGE =
+            "SHELL() requires a host-provided TaskRunner in this environment";
+
+    @Override
+    public Task execute(TaskRequest request) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public Task getTask(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public Task waitForCompletion(String taskId, long timeoutMs) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public boolean killTask(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public TaskObservation observe(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public String getStdout(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public String getStderr(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public String getCombinedOutput(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public Integer getExitCode(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public Map<String, Object> getStatusMap(String taskId) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
+    public void shutdown() {
+        // no-op
+    }
+}

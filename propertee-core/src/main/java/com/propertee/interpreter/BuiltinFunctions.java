@@ -6,11 +6,11 @@ import com.propertee.runtime.Result;
 import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.ThreadContext;
 import com.propertee.stepper.SchedulerCommand;
-import com.propertee.task.DefaultTaskRunner;
 import com.propertee.task.Task;
 import com.propertee.task.TaskObservation;
 import com.propertee.task.TaskRequest;
 import com.propertee.task.TaskRunner;
+import com.propertee.task.UnsupportedTaskRunner;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -656,11 +656,7 @@ public class BuiltinFunctions {
     }
 
     private static TaskRunner createDefaultTaskRunner() {
-        String baseDir = System.getProperty("propertee.task.baseDir");
-        if (baseDir == null || baseDir.trim().length() == 0) {
-            baseDir = new File(System.getProperty("java.io.tmpdir"), "propertee-java-task-engine").getAbsolutePath();
-        }
-        return new DefaultTaskRunner(baseDir);
+        return new UnsupportedTaskRunner();
     }
 
     private static String createRunId() {
