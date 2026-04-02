@@ -71,7 +71,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-**Script tests:** 85 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-85, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 78-80 test `START_TASK`/`WAIT_TASK`/`CANCEL_TASK`; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
+**Script tests:** 85 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-85, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -140,7 +140,7 @@ interface Stepper {
 |---|---|
 | `propertee-core/grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn keys reuse the `access` rule (same as property access): `thread key:`, `thread "key":`, `thread 42:`, `thread $var:`, `thread $::var:`, `thread $(expr):`, `thread :` (unnamed). `arrayLiteral` has two alternatives: `RangeArray` (`[start..end]` or `[start..end, step]`) and `ListArray` (`[1, 2, 3]`). Object keys must be quoted strings or integers — bare identifiers are not allowed (`{"name": "Alice"}`, not `{name: "Alice"}`). |
 | `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `visitSpawnKeyStmt` resolves key from `access` context (StaticAccess, StringKeyAccess, ArrayAccess, VarEvalAccess, EvalAccess). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Integer keys on objects become string keys in `getProperty()`. `resolveAndValidateDynamicKey()` auto-coerces dynamic keys to string via `TO_STRING()` (empty treated as unnamed, no duplicates). |
-| `BuiltinFunctions.java` | 64 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, KEYS, SORT, SORT_DESC, SORT_BY, SORT_BY_DESC, REVERSE, RANDOM, MILTIME, DATE, TIME, SHELL, SHELL_CTX, START_TASK, TASK_STATUS, TASK_RESULT, WAIT_TASK, CANCEL_TASK, etc.). Internal registration uses private `registerResult()`/`registerResultAsync()`; host injection uses public `registerExternal()`/`registerExternalAsync()`. LEN supports strings, arrays, and objects. `registerExternal()` for sync I/O, `registerExternalAsync()` for async I/O (blocking calls on thread pool). `SHELL` and task functions use `TaskRunner` interface (was `TaskEngine`, now lightweight). `SHELL_CTX(cwd[, env])` creates a context config (sync via `registerExternal`). `SHELL(cmd)` or `SHELL(ctx, cmd)` executes shell commands (async via `registerExternalAsync`). `SHELL` auto-unwraps Result from `SHELL_CTX` — pass the Result directly, not `.value`. `PrintFunction` interface takes `Object[]` args, not `String` |
+| `BuiltinFunctions.java` | Built-in functions: pure (string matching, map extensions, JSON, TYPE_OF), host-gated (ENV, file I/O via PlatformProvider), shell (SHELL, SHELL_CTX via TaskRunner). Internal registration uses private `registerResult()`/`registerResultAsync()`; host injection uses public `registerExternal()`/`registerExternalAsync()`. `SHELL` is async via `registerResultAsync`. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `PlatformProvider.java` | Interface for host-gated OS capabilities (ENV, file I/O). `DefaultPlatformProvider` provides unrestricted access; `UnsupportedPlatformProvider` rejects all calls. Hosts implement this to apply path restrictions, read-only policies, etc. |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships, `resultCollection` (live map updated in-place by scheduler) |
@@ -281,7 +281,7 @@ BLOCKED → READY                    (async future completed or timed out)
 
 ## TaskRunner (`com.propertee.task`)
 
-Manages detached shell processes for SHELL()/START_TASK() builtins.
+Manages detached shell processes for SHELL() builtin.
 
 | Class | Role |
 |---|---|
@@ -373,13 +373,6 @@ loop x in [1..10] do ... end  // range in loop
 result = SHELL("echo hello")             // one-off
 ctx = SHELL_CTX("/data", {"ENV": "prod"})
 result = SHELL(ctx, "./build.sh")        // with context (auto-unwraps Result)
-
-// Task engine — detached external processes
-taskId = START_TASK("long-job.sh")       // returns task ID string
-status = TASK_STATUS(taskId)             // observation map
-result = WAIT_TASK(taskId, 5000)         // wait with timeout
-result = TASK_RESULT(taskId)             // get completed result
-CANCEL_TASK(taskId)                      // kill task and descendants
 ```
 
 ## External Functions & Result Pattern
