@@ -4,6 +4,7 @@ import com.propertee.core.ScriptParser;
 import com.propertee.interpreter.BuiltinFunctions;
 import com.propertee.interpreter.ProperTeeInterpreter;
 import com.propertee.platform.DefaultPlatformProvider;
+import com.propertee.task.SimpleTaskRunner;
 import com.propertee.parser.ProperTeeParser;
 import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.Scheduler;
@@ -133,7 +134,7 @@ public class Main {
                 return;
             }
 
-            BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, null, new DefaultPlatformProvider());
+            BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, new SimpleTaskRunner(), new DefaultPlatformProvider());
             ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, maxIterations, iterationLimitBehavior, builtins);
             Scheduler scheduler = new Scheduler(visitor);
             Stepper mainStepper = visitor.createRootStepper(tree);

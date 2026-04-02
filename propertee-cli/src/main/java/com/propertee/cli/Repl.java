@@ -4,6 +4,7 @@ import com.propertee.core.ScriptParser;
 import com.propertee.interpreter.BuiltinFunctions;
 import com.propertee.interpreter.ProperTeeInterpreter;
 import com.propertee.platform.DefaultPlatformProvider;
+import com.propertee.task.SimpleTaskRunner;
 import com.propertee.parser.ProperTeeParser;
 import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.Scheduler;
@@ -33,7 +34,7 @@ public class Repl {
         System.out.println("Type ProperTee statements. Multi-line blocks auto-detected (do/end, if/end, multi/end).");
         System.out.println("Type .exit to quit, .vars to show variables.\n");
 
-        BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, null, new DefaultPlatformProvider());
+        BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, new SimpleTaskRunner(), new DefaultPlatformProvider());
         ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, maxIterations, iterationLimitBehavior, builtins);
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
