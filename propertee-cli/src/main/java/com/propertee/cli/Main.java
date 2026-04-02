@@ -22,7 +22,7 @@ import java.util.*;
 
 public class Main {
 
-    public static final String VERSION = "0.3.0";
+    public static final String VERSION = "0.4.0";
 
     public static ProperTeeParser.RootContext parseScript(String scriptText, List<String> errors) {
         return ScriptParser.parse(scriptText, errors);
