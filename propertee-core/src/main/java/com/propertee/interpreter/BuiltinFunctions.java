@@ -650,7 +650,7 @@ public class BuiltinFunctions {
 
         // --- Environment (delegates to PlatformProvider) ---
 
-        registerExternal("ENV", new BuiltinFunction() {
+        registerResult("ENV", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -668,7 +668,7 @@ public class BuiltinFunctions {
 
         // --- JSON ---
 
-        registerExternal("JSON_PARSE", new BuiltinFunction() {
+        registerResult("JSON_PARSE", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -687,7 +687,7 @@ public class BuiltinFunctions {
 
         // --- File I/O (delegates to PlatformProvider) ---
 
-        registerExternal("FILE_EXISTS", new BuiltinFunction() {
+        registerResult("FILE_EXISTS", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -696,7 +696,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("FILE_INFO", new BuiltinFunction() {
+        registerResult("FILE_INFO", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -710,7 +710,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("READ_LINES", new BuiltinFunction() {
+        registerResult("READ_LINES", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -736,7 +736,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("WRITE_FILE", new BuiltinFunction() {
+        registerResult("WRITE_FILE", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.size() < 2 || !(args.get(0) instanceof String) || !(args.get(1) instanceof String))
@@ -746,7 +746,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("WRITE_LINES", new BuiltinFunction() {
+        registerResult("WRITE_LINES", new BuiltinFunction() {
             @Override
             @SuppressWarnings("unchecked")
             public Object call(List<Object> args) {
@@ -761,7 +761,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("APPEND_FILE", new BuiltinFunction() {
+        registerResult("APPEND_FILE", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.size() < 2 || !(args.get(0) instanceof String) || !(args.get(1) instanceof String))
@@ -771,7 +771,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("MKDIR", new BuiltinFunction() {
+        registerResult("MKDIR", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -781,7 +781,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("LIST_DIR", new BuiltinFunction() {
+        registerResult("LIST_DIR", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -799,7 +799,7 @@ public class BuiltinFunctions {
             }
         });
 
-        registerExternal("DELETE_FILE", new BuiltinFunction() {
+        registerResult("DELETE_FILE", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty() || !(args.get(0) instanceof String))
@@ -810,7 +810,7 @@ public class BuiltinFunctions {
         });
 
         // SHELL_CTX — sync, creates a context config object
-        registerExternal("SHELL_CTX", new BuiltinFunction() {
+        registerResult("SHELL_CTX", new BuiltinFunction() {
             @Override
             @SuppressWarnings("unchecked")
             public Object call(List<Object> args) {
@@ -854,7 +854,7 @@ public class BuiltinFunctions {
         });
 
         // SHELL — async, executes shell commands via TaskEngine
-        registerExternalAsync("SHELL", new BuiltinFunction() {
+        registerResultAsync("SHELL", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty()) {
@@ -875,7 +875,7 @@ public class BuiltinFunctions {
                     return Result.error("interrupted");
                 }
             }
-        });
+        }, 0, true);
     }
 
     public boolean has(String name) {
@@ -933,7 +933,10 @@ public class BuiltinFunctions {
         return ((String) a).compareTo((String) b);
     }
 
-    public void registerExternal(String name, final BuiltinFunction func) {
+    // --- Internal registration (Result pattern with exception wrapping) ---
+    // Used by registerDefaults() for core built-ins.
+
+    private void registerResult(String name, final BuiltinFunction func) {
         functions.put(name, new BuiltinFunction() {
             @Override
             public Object call(java.util.List<Object> args) {
@@ -946,7 +949,17 @@ public class BuiltinFunctions {
         });
     }
 
-    // --- Async external function support ---
+    // --- Public API for host-injected functions ---
+
+    /**
+     * Register a host-provided function with automatic error wrapping.
+     * Thrown exceptions are caught and returned as Result.error(message).
+     */
+    public void registerExternal(String name, final BuiltinFunction func) {
+        registerResult(name, func);
+    }
+
+    // --- Async function support ---
 
     public void setInterpreter(ProperTeeInterpreter interpreter) {
         this.interpreter = interpreter;
@@ -1113,15 +1126,7 @@ public class BuiltinFunctions {
         return output;
     }
 
-    public void registerExternalAsync(final String name, final BuiltinFunction func) {
-        registerExternalAsync(name, func, 0);
-    }
-
-    public void registerExternalAsync(final String name, final BuiltinFunction func, final long timeoutMs) {
-        registerExternalAsync(name, func, timeoutMs, true);
-    }
-
-    public void registerExternalAsync(final String name, final BuiltinFunction func, final long timeoutMs,
+    private void registerResultAsync(final String name, final BuiltinFunction func, final long timeoutMs,
                                       final boolean cacheEnabled) {
         functions.put(name, new BuiltinFunction() {
             @Override
@@ -1177,6 +1182,23 @@ public class BuiltinFunctions {
                 throw new AsyncPendingException();
             }
         });
+    }
+
+    /**
+     * Register a host-provided async function.
+     * The function runs on a background thread; other ProperTee threads continue.
+     * Thrown exceptions are caught and returned as Result.error(message).
+     */
+    public void registerExternalAsync(String name, BuiltinFunction func) {
+        registerResultAsync(name, func, 0, true);
+    }
+
+    public void registerExternalAsync(String name, BuiltinFunction func, long timeoutMs) {
+        registerResultAsync(name, func, timeoutMs, true);
+    }
+
+    public void registerExternalAsync(String name, BuiltinFunction func, long timeoutMs, boolean cacheEnabled) {
+        registerResultAsync(name, func, timeoutMs, cacheEnabled);
     }
 
     // --- JSON conversion helpers ---
