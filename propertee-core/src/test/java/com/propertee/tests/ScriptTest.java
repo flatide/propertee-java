@@ -12,6 +12,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import com.propertee.platform.DefaultPlatformProvider;
 import com.propertee.runtime.Result;
 
 import java.io.*;
@@ -95,7 +96,12 @@ public class ScriptTest {
             "77_range_int_overflow",
             "78_task_basic",
             "79_task_cancel",
-            "80_task_unique_ids"
+            "80_task_unique_ids",
+            "81_string_matching",
+            "82_map_extensions",
+            "83_type_env",
+            "84_json",
+            "85_file_io"
         };
 
         for (String name : testNames) {
@@ -112,6 +118,14 @@ public class ScriptTest {
                 props.put("width", 100);
                 props.put("height", 200);
                 props.put("name", "test");
+            }
+            if ("85_file_io".equals(name)) {
+                try {
+                    File testDir = Files.createTempDirectory("propertee-file-io-test").toFile();
+                    props.put("testDir", testDir.getAbsolutePath());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
             }
 
             tests.add(new Object[]{name, script, expected, props});
@@ -179,7 +193,12 @@ public class ScriptTest {
                 output.append(err);
             }
         } else {
-            ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, 1000, "error");
+            // Tests that use ENV or file I/O need a PlatformProvider
+            boolean needsPlatform = "83_type_env".equals(testName) || "85_file_io".equals(testName);
+            BuiltinFunctions testBuiltins = needsPlatform
+                ? new BuiltinFunctions(stdout, stderr, null, null, new DefaultPlatformProvider())
+                : null;
+            ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, 1000, "error", testBuiltins);
 
             // Register test external functions for test 41
             if ("41_result_pattern".equals(testName)) {

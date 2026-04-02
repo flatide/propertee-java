@@ -6,16 +6,29 @@ import com.propertee.runtime.Result;
 import com.propertee.runtime.TypeChecker;
 import com.propertee.scheduler.ThreadContext;
 import com.propertee.stepper.SchedulerCommand;
+import com.propertee.platform.PlatformProvider;
+import com.propertee.platform.UnsupportedPlatformProvider;
 import com.propertee.task.Task;
 import com.propertee.task.TaskObservation;
 import com.propertee.task.TaskRequest;
 import com.propertee.task.TaskRunner;
 import com.propertee.task.UnsupportedTaskRunner;
 
-import java.io.File;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
+
+import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class BuiltinFunctions {
 
@@ -35,19 +48,25 @@ public class BuiltinFunctions {
     private ExecutorService asyncExecutor;
     private boolean ownedExecutor = false;
     private final TaskRunner taskRunner;
+    private final PlatformProvider platform;
     private final String runId;
     private static final ThreadLocal<Integer> asyncOriginThreadId = new ThreadLocal<Integer>();
     private static final ThreadLocal<String> asyncOriginThreadName = new ThreadLocal<String>();
 
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr) {
-        this(stdout, stderr, null, null);
+        this(stdout, stderr, null, null, null);
     }
 
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr, String runId, TaskRunner taskRunner) {
+        this(stdout, stderr, runId, taskRunner, null);
+    }
+
+    public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr, String runId, TaskRunner taskRunner, PlatformProvider platform) {
         this.stdout = stdout;
         this.stderr = stderr;
         this.runId = runId != null ? runId : createRunId();
         this.taskRunner = taskRunner != null ? taskRunner : createDefaultTaskRunner();
+        this.platform = platform != null ? platform : new UnsupportedPlatformProvider();
         registerDefaults();
     }
 
@@ -492,8 +511,306 @@ public class BuiltinFunctions {
             }
         });
 
+        // --- String matching ---
+
+        functions.put("CONTAINS", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof String)) throw new ProperTeeError("Runtime Error: CONTAINS() first argument must be a string");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: CONTAINS() second argument must be a string");
+                return ((String) args.get(0)).contains((String) args.get(1));
+            }
+        });
+
+        functions.put("STARTS_WITH", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof String)) throw new ProperTeeError("Runtime Error: STARTS_WITH() first argument must be a string");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: STARTS_WITH() second argument must be a string");
+                return ((String) args.get(0)).startsWith((String) args.get(1));
+            }
+        });
+
+        functions.put("ENDS_WITH", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof String)) throw new ProperTeeError("Runtime Error: ENDS_WITH() first argument must be a string");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: ENDS_WITH() second argument must be a string");
+                return ((String) args.get(0)).endsWith((String) args.get(1));
+            }
+        });
+
+        functions.put("MATCHES", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof String)) throw new ProperTeeError("Runtime Error: MATCHES() first argument must be a string");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: MATCHES() second argument must be a string");
+                try {
+                    return Pattern.compile((String) args.get(1)).matcher((String) args.get(0)).find();
+                } catch (PatternSyntaxException e) {
+                    throw new ProperTeeError("Runtime Error: MATCHES() invalid regex pattern: " + e.getMessage());
+                }
+            }
+        });
+
+        functions.put("REGEX_FIND", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof String)) throw new ProperTeeError("Runtime Error: REGEX_FIND() first argument must be a string");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: REGEX_FIND() second argument must be a string");
+                try {
+                    Matcher matcher = Pattern.compile((String) args.get(1)).matcher((String) args.get(0));
+                    if (!matcher.find()) {
+                        return new LinkedHashMap<String, Object>();
+                    }
+                    List<Object> groups = new ArrayList<Object>();
+                    for (int i = 0; i <= matcher.groupCount(); i++) {
+                        String g = matcher.group(i);
+                        groups.add(g != null ? (Object) g : new LinkedHashMap<String, Object>());
+                    }
+                    return groups;
+                } catch (PatternSyntaxException e) {
+                    throw new ProperTeeError("Runtime Error: REGEX_FIND() invalid regex pattern: " + e.getMessage());
+                }
+            }
+        });
+
+        functions.put("REPLACE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof String)) throw new ProperTeeError("Runtime Error: REPLACE() first argument must be a string");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: REPLACE() second argument must be a string");
+                if (!(args.get(2) instanceof String)) throw new ProperTeeError("Runtime Error: REPLACE() third argument must be a string");
+                return ((String) args.get(0)).replace((String) args.get(1), (String) args.get(2));
+            }
+        });
+
+        // --- Map extensions ---
+
+        functions.put("VALUES", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                Object obj = args.get(0);
+                if (!(obj instanceof Map)) throw new ProperTeeError("Runtime Error: VALUES() argument must be an object");
+                return new ArrayList<Object>(((Map<String, Object>) obj).values());
+            }
+        });
+
+        functions.put("ENTRIES", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                Object obj = args.get(0);
+                if (!(obj instanceof Map)) throw new ProperTeeError("Runtime Error: ENTRIES() argument must be an object");
+                Map<String, Object> map = (Map<String, Object>) obj;
+                List<Object> entries = new ArrayList<Object>();
+                for (Map.Entry<String, Object> entry : map.entrySet()) {
+                    Map<String, Object> e = new LinkedHashMap<String, Object>();
+                    e.put("key", entry.getKey());
+                    e.put("value", entry.getValue());
+                    entries.add(e);
+                }
+                return entries;
+            }
+        });
+
+        functions.put("MERGE", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof Map)) throw new ProperTeeError("Runtime Error: MERGE() first argument must be an object");
+                if (!(args.get(1) instanceof Map)) throw new ProperTeeError("Runtime Error: MERGE() second argument must be an object");
+                Map<String, Object> result = new LinkedHashMap<String, Object>((Map<String, Object>) args.get(0));
+                result.putAll((Map<String, Object>) args.get(1));
+                return result;
+            }
+        });
+
+        functions.put("REMOVE_KEY", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (!(args.get(0) instanceof Map)) throw new ProperTeeError("Runtime Error: REMOVE_KEY() first argument must be an object");
+                if (!(args.get(1) instanceof String)) throw new ProperTeeError("Runtime Error: REMOVE_KEY() second argument must be a string");
+                Map<String, Object> result = new LinkedHashMap<String, Object>((Map<String, Object>) args.get(0));
+                result.remove((String) args.get(1));
+                return result;
+            }
+        });
+
+        // --- Type ---
+
+        functions.put("TYPE_OF", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return TypeChecker.typeOf(args.get(0));
+            }
+        });
+
+        // --- Environment (delegates to PlatformProvider) ---
+
+        registerResult("ENV", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    throw new ProperTeeError("Runtime Error: ENV() requires a string argument");
+                String value = platform.getEnv((String) args.get(0));
+                if (value != null) {
+                    return value;
+                }
+                if (args.size() >= 2) {
+                    return args.get(1);
+                }
+                return new LinkedHashMap<String, Object>();
+            }
+        });
+
+        // --- JSON ---
+
+        registerResult("JSON_PARSE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    return Result.error("JSON_PARSE() requires a string argument");
+                JsonElement element = JsonParser.parseString((String) args.get(0));
+                return Result.ok(jsonToProperTee(element));
+            }
+        });
+
+        functions.put("JSON_FORMAT", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return new Gson().toJson(properTeeToJson(args.get(0)));
+            }
+        });
+
+        // --- File I/O (delegates to PlatformProvider) ---
+
+        registerResult("FILE_EXISTS", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    throw new ProperTeeError("Runtime Error: FILE_EXISTS() requires a string argument");
+                return platform.fileExists((String) args.get(0));
+            }
+        });
+
+        registerResult("FILE_INFO", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    return Result.error("FILE_INFO() requires a string argument");
+                PlatformProvider.FileInfo info = platform.fileInfo((String) args.get(0));
+                Map<String, Object> map = new LinkedHashMap<String, Object>();
+                map.put("type", info.type);
+                map.put("size", TypeChecker.boxNumber((double) info.size));
+                map.put("modified", TypeChecker.boxNumber((double) info.modified));
+                return Result.ok(map);
+            }
+        });
+
+        registerResult("READ_LINES", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    return Result.error("READ_LINES() first argument must be a string path");
+                int start = 1;
+                int count = Integer.MAX_VALUE;
+                if (args.size() >= 2 && TypeChecker.isNumber(args.get(1))) {
+                    double startD = TypeChecker.toDouble(args.get(1));
+                    if (!TypeChecker.isInteger(startD))
+                        return Result.error("READ_LINES() start must be an integer, got " + startD);
+                    start = (int) startD;
+                }
+                if (args.size() >= 3 && TypeChecker.isNumber(args.get(2))) {
+                    double countD = TypeChecker.toDouble(args.get(2));
+                    if (!TypeChecker.isInteger(countD))
+                        return Result.error("READ_LINES() count must be an integer, got " + countD);
+                    count = (int) countD;
+                }
+                if (start < 1) return Result.error("READ_LINES() start must be >= 1");
+                if (count < 1) return Result.error("READ_LINES() count must be >= 1");
+                List<String> lines = platform.readLines((String) args.get(0), start, count);
+                return Result.ok(new ArrayList<Object>(lines));
+            }
+        });
+
+        registerResult("WRITE_FILE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.size() < 2 || !(args.get(0) instanceof String) || !(args.get(1) instanceof String))
+                    return Result.error("WRITE_FILE() requires (path, content) string arguments");
+                platform.writeFile((String) args.get(0), (String) args.get(1));
+                return Result.ok(new LinkedHashMap<String, Object>());
+            }
+        });
+
+        registerResult("WRITE_LINES", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (args.size() < 2 || !(args.get(0) instanceof String) || !(args.get(1) instanceof List))
+                    return Result.error("WRITE_LINES() requires (path, lines) arguments");
+                List<String> lines = new ArrayList<String>();
+                for (Object item : (List<Object>) args.get(1)) {
+                    lines.add(TypeChecker.toStringValue(item));
+                }
+                platform.writeLines((String) args.get(0), lines);
+                return Result.ok(new LinkedHashMap<String, Object>());
+            }
+        });
+
+        registerResult("APPEND_FILE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.size() < 2 || !(args.get(0) instanceof String) || !(args.get(1) instanceof String))
+                    return Result.error("APPEND_FILE() requires (path, content) string arguments");
+                platform.appendFile((String) args.get(0), (String) args.get(1));
+                return Result.ok(new LinkedHashMap<String, Object>());
+            }
+        });
+
+        registerResult("MKDIR", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    return Result.error("MKDIR() requires a string argument");
+                platform.mkdir((String) args.get(0));
+                return Result.ok(new LinkedHashMap<String, Object>());
+            }
+        });
+
+        registerResult("LIST_DIR", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    return Result.error("LIST_DIR() requires a string argument");
+                List<PlatformProvider.FileEntry> entries = platform.listDir((String) args.get(0));
+                List<Object> result = new ArrayList<Object>();
+                for (PlatformProvider.FileEntry entry : entries) {
+                    Map<String, Object> map = new LinkedHashMap<String, Object>();
+                    map.put("name", entry.name);
+                    map.put("type", entry.type);
+                    map.put("size", TypeChecker.boxNumber((double) entry.size));
+                    result.add(map);
+                }
+                return Result.ok(result);
+            }
+        });
+
+        registerResult("DELETE_FILE", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String))
+                    return Result.error("DELETE_FILE() requires a string argument");
+                platform.deleteFile((String) args.get(0));
+                return Result.ok(new LinkedHashMap<String, Object>());
+            }
+        });
+
         // SHELL_CTX — sync, creates a context config object
-        registerExternal("SHELL_CTX", new BuiltinFunction() {
+        registerResult("SHELL_CTX", new BuiltinFunction() {
             @Override
             @SuppressWarnings("unchecked")
             public Object call(List<Object> args) {
@@ -537,7 +854,7 @@ public class BuiltinFunctions {
         });
 
         // SHELL — async, executes shell commands via TaskEngine
-        registerExternalAsync("SHELL", new BuiltinFunction() {
+        registerResultAsync("SHELL", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (args.isEmpty()) {
@@ -558,7 +875,7 @@ public class BuiltinFunctions {
                     return Result.error("interrupted");
                 }
             }
-        });
+        }, 0, true);
     }
 
     public boolean has(String name) {
@@ -616,7 +933,10 @@ public class BuiltinFunctions {
         return ((String) a).compareTo((String) b);
     }
 
-    public void registerExternal(String name, final BuiltinFunction func) {
+    // --- Internal registration (Result pattern with exception wrapping) ---
+    // Used by registerDefaults() for core built-ins.
+
+    private void registerResult(String name, final BuiltinFunction func) {
         functions.put(name, new BuiltinFunction() {
             @Override
             public Object call(java.util.List<Object> args) {
@@ -629,7 +949,17 @@ public class BuiltinFunctions {
         });
     }
 
-    // --- Async external function support ---
+    // --- Public API for host-injected functions ---
+
+    /**
+     * Register a host-provided function with automatic error wrapping.
+     * Thrown exceptions are caught and returned as Result.error(message).
+     */
+    public void registerExternal(String name, final BuiltinFunction func) {
+        registerResult(name, func);
+    }
+
+    // --- Async function support ---
 
     public void setInterpreter(ProperTeeInterpreter interpreter) {
         this.interpreter = interpreter;
@@ -796,15 +1126,7 @@ public class BuiltinFunctions {
         return output;
     }
 
-    public void registerExternalAsync(final String name, final BuiltinFunction func) {
-        registerExternalAsync(name, func, 0);
-    }
-
-    public void registerExternalAsync(final String name, final BuiltinFunction func, final long timeoutMs) {
-        registerExternalAsync(name, func, timeoutMs, true);
-    }
-
-    public void registerExternalAsync(final String name, final BuiltinFunction func, final long timeoutMs,
+    private void registerResultAsync(final String name, final BuiltinFunction func, final long timeoutMs,
                                       final boolean cacheEnabled) {
         functions.put(name, new BuiltinFunction() {
             @Override
@@ -860,6 +1182,85 @@ public class BuiltinFunctions {
                 throw new AsyncPendingException();
             }
         });
+    }
+
+    /**
+     * Register a host-provided async function.
+     * The function runs on a background thread; other ProperTee threads continue.
+     * Thrown exceptions are caught and returned as Result.error(message).
+     */
+    public void registerExternalAsync(String name, BuiltinFunction func) {
+        registerResultAsync(name, func, 0, true);
+    }
+
+    public void registerExternalAsync(String name, BuiltinFunction func, long timeoutMs) {
+        registerResultAsync(name, func, timeoutMs, true);
+    }
+
+    public void registerExternalAsync(String name, BuiltinFunction func, long timeoutMs, boolean cacheEnabled) {
+        registerResultAsync(name, func, timeoutMs, cacheEnabled);
+    }
+
+    // --- JSON conversion helpers ---
+
+    private static Object jsonToProperTee(JsonElement element) {
+        if (element == null || element.isJsonNull()) {
+            return new LinkedHashMap<String, Object>();
+        }
+        if (element.isJsonPrimitive()) {
+            JsonPrimitive prim = element.getAsJsonPrimitive();
+            if (prim.isBoolean()) return prim.getAsBoolean();
+            if (prim.isNumber()) return TypeChecker.boxNumber(prim.getAsDouble());
+            return prim.getAsString();
+        }
+        if (element.isJsonArray()) {
+            JsonArray arr = element.getAsJsonArray();
+            List<Object> result = new ArrayList<Object>();
+            for (int i = 0; i < arr.size(); i++) {
+                result.add(jsonToProperTee(arr.get(i)));
+            }
+            return result;
+        }
+        if (element.isJsonObject()) {
+            JsonObject obj = element.getAsJsonObject();
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<String, JsonElement> entry : obj.entrySet()) {
+                result.put(entry.getKey(), jsonToProperTee(entry.getValue()));
+            }
+            return result;
+        }
+        return new LinkedHashMap<String, Object>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static JsonElement properTeeToJson(Object value) {
+        if (value == null) return JsonNull.INSTANCE;
+        if (value instanceof Boolean) return new JsonPrimitive((Boolean) value);
+        if (value instanceof Integer) return new JsonPrimitive((Integer) value);
+        if (value instanceof Double) {
+            double d = (Double) value;
+            if (TypeChecker.isInteger(d) && d >= Integer.MIN_VALUE && d <= Integer.MAX_VALUE) {
+                return new JsonPrimitive((int) d);
+            }
+            return new JsonPrimitive(d);
+        }
+        if (value instanceof Number) return new JsonPrimitive((Number) value);
+        if (value instanceof String) return new JsonPrimitive((String) value);
+        if (value instanceof List) {
+            JsonArray arr = new JsonArray();
+            for (Object item : (List<Object>) value) {
+                arr.add(properTeeToJson(item));
+            }
+            return arr;
+        }
+        if (value instanceof Map) {
+            JsonObject obj = new JsonObject();
+            for (Map.Entry<String, Object> entry : ((Map<String, Object>) value).entrySet()) {
+                obj.add(entry.getKey(), properTeeToJson(entry.getValue()));
+            }
+            return obj;
+        }
+        return JsonNull.INSTANCE;
     }
 
     private String buildAsyncCacheKey(String name, List<Object> args) {
