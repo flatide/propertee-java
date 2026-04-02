@@ -43,7 +43,7 @@ public class Repl {
 
         try {
             while (true) {
-                System.out.print(depth > 0 ? "... " : "pt> ");
+                System.out.print(depth > 0 ? "... " : "tee> ");
                 System.out.flush();
                 String line = reader.readLine();
                 if (line == null) break;
