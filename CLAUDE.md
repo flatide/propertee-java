@@ -34,7 +34,7 @@ Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Gram
 ./gradlew jarAll                  # Both JARs
 
 # Run a script via Gradle:
-./gradlew :propertee-cli:run --args="sample/01_hello.pt"
+./gradlew :propertee-cli:run --args="sample/01_hello.tee"
 ```
 
 **After any grammar change** (`propertee-core/grammar/ProperTee.g4`), run `./gradlew generateGrammarSource` to regenerate parser files.
@@ -43,13 +43,13 @@ Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Gram
 
 ## CLI Runner
 
-`Main.java` runs `.pt` scripts from the command line. Falls back to an interactive REPL when no file is given.
+`Main.java` runs `.tee` scripts from the command line. Falls back to an interactive REPL when no file is given.
 
 ```bash
-java -jar build/libs/propertee-java-java8.jar script.pt                    # run a script
-java -jar build/libs/propertee-java-java8.jar -p '{"width":100}' script.pt # with built-in properties
-java -jar build/libs/propertee-java-java8.jar -f props.json script.pt      # properties from file
-java -jar build/libs/propertee-java-java8.jar --max-iterations 5000 script.pt
+java -jar build/libs/propertee-java-java8.jar script.tee                    # run a script
+java -jar build/libs/propertee-java-java8.jar -p '{"width":100}' script.tee # with built-in properties
+java -jar build/libs/propertee-java-java8.jar -f props.json script.tee      # properties from file
+java -jar build/libs/propertee-java-java8.jar --max-iterations 5000 script.tee
 java -jar build/libs/propertee-java-java8.jar                              # interactive REPL
 ```
 
@@ -71,13 +71,13 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-**Script tests:** 85 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-85, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
+**Script tests:** 85 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-85, test 31 skipped). Each `NN_name.tee` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
 
-**Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
+**Adding a new test:** Create `NN_name.tee` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
 **TaskRunner tests:** `TaskEngineTest.java` tests DefaultTaskRunner process lifecycle and kill/cancel behavior. These spawn real shell processes. Multi-instance and archival tests have been moved to TeeBox's ManagedTaskEngineTest.
 
-**Sample scripts:** `sample/01_hello.pt` through `sample/16_comments.pt` cover all language features.
+**Sample scripts:** `sample/01_hello.tee` through `sample/16_comments.tee` cover all language features.
 
 ## Architecture
 

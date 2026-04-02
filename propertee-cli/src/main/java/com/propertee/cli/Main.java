@@ -53,7 +53,7 @@ public class Main {
                 System.out.println("ProperTee " + VERSION);
                 System.exit(0);
             } else if ("-h".equals(args[i]) || "--help".equals(args[i])) {
-                System.out.println("Usage: java -jar propertee.jar [options] [script.pt]");
+                System.out.println("Usage: java -jar propertee.jar [options] [script.tee]");
                 System.out.println();
                 System.out.println("Options:");
                 System.out.println("  -p, --props <json>    Built-in properties as JSON string");

@@ -13,10 +13,10 @@ For language specification, syntax reference, and built-in functions, see the [P
 ./gradlew clean build
 
 # Run a script
-java -jar build/libs/propertee-java-java8.jar script.pt
+java -jar build/libs/propertee-java-java8.jar script.tee
 
 # With built-in properties
-java -jar build/libs/propertee-java-java8.jar -p '{"width":100}' script.pt
+java -jar build/libs/propertee-java-java8.jar -p '{"width":100}' script.tee
 
 # Interactive REPL
 java -jar build/libs/propertee-java-java8.jar

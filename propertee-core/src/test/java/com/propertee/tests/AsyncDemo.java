@@ -14,7 +14,7 @@ import java.util.*;
 
 /**
  * Host application demo for async external functions.
- * Usage: ./gradlew runAsyncDemo --args="path/to/script.pt"
+ * Usage: ./gradlew runAsyncDemo --args="path/to/script.tee"
  *    or: ./gradlew runAsyncDemo   (runs the built-in test script)
  */
 public class AsyncDemo {

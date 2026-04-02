@@ -42,7 +42,7 @@ public class ScriptTest {
         // Try classpath resources first
         String resourceBase = "/tests/";
 
-        // Find all .pt test files
+        // Find all .tee test files
         // We need to enumerate them - classpath resources can't be listed easily,
         // so we use a known list
         String[] testNames = {
@@ -105,7 +105,7 @@ public class ScriptTest {
         };
 
         for (String name : testNames) {
-            InputStream ptStream = ScriptTest.class.getResourceAsStream(resourceBase + name + ".pt");
+            InputStream ptStream = ScriptTest.class.getResourceAsStream(resourceBase + name + ".tee");
             InputStream expStream = ScriptTest.class.getResourceAsStream(resourceBase + name + ".expected");
 
             if (ptStream == null || expStream == null) continue;

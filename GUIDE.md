@@ -9,7 +9,7 @@ A beginner-friendly introduction to the ProperTee concurrent DSL.
 Run a script:
 
 ```bash
-java -jar propertee-java.jar script.pt
+java -jar propertee-java.jar script.tee
 ```
 
 Or start the interactive REPL:
@@ -447,16 +447,16 @@ Result objects have two fields:
 
 ```bash
 # Run a script
-java -jar propertee-java.jar script.pt
+java -jar propertee-java.jar script.tee
 
 # Pass built-in properties
-java -jar propertee-java.jar -p '{"width":100}' script.pt
+java -jar propertee-java.jar -p '{"width":100}' script.tee
 
 # Properties from a JSON file
-java -jar propertee-java.jar -f props.json script.pt
+java -jar propertee-java.jar -f props.json script.tee
 
 # Set custom loop iteration limit
-java -jar propertee-java.jar --max-iterations 5000 script.pt
+java -jar propertee-java.jar --max-iterations 5000 script.tee
 ```
 
 Built-in properties are accessible as global variables in the script.

@@ -134,7 +134,7 @@
 ### Script 저장 구조
 권장 저장 구조:
 - `dataDir/scripts/<scriptId>/metadata.json`
-- `dataDir/scripts/<scriptId>/versions/<version>.pt`
+- `dataDir/scripts/<scriptId>/versions/<version>.tee`
 - `dataDir/scripts/<scriptId>/versions/<version>.json`
 
 metadata 예시:

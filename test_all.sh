@@ -27,9 +27,9 @@ run_tests() {
 
     printf "${YELLOW}=== Testing: %s ===${NC}\n" "$LABEL"
 
-    for pt_file in "$TEST_DIR"/*.pt; do
+    for pt_file in "$TEST_DIR"/*.tee; do
         [ -f "$pt_file" ] || continue
-        base="${pt_file%.pt}"
+        base="${pt_file%.tee}"
         expected_file="${base}.expected"
         test_name="$(basename "$base")"
 

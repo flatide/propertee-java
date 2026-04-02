@@ -76,7 +76,7 @@ ssh "${SSH_ARGS[@]}" "$REMOTE_HOST" "
     cd teebox
     chmod +x ./bin/run-teebox.sh
     mkdir -p smoke-scripts smoke-data
-    cat > smoke-scripts/smoke.pt <<'EOF'
+    cat > smoke-scripts/smoke.tee <<'EOF'
 PRINT(\"teebox smoke ok\")
 EOF
     cat > conf/teebox.properties <<'EOF'
