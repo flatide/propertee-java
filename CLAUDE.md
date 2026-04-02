@@ -12,7 +12,7 @@ Multi-module Gradle project with three subprojects:
 
 | Module | Contents | Depends On |
 |---|---|---|
-| `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, TaskRunner, ANTLR grammar | — |
+| `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, TaskRunner, platform provider, ANTLR grammar | — |
 | `propertee-cli` | CLI runner (`Main.java`) and interactive REPL (`Repl.java`) | `propertee-core` |
 
 Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Grammar at `propertee-core/grammar/ProperTee.g4`. Tests at `propertee-core/src/test/`.
@@ -71,7 +71,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-**Script tests:** 79 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-80, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 78-80 test `START_TASK`/`WAIT_TASK`/`CANCEL_TASK`.
+**Script tests:** 85 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-85, test 31 skipped). Each `NN_name.pt` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 78-80 test `START_TASK`/`WAIT_TASK`/`CANCEL_TASK`; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
 
 **Adding a new test:** Create `NN_name.pt` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 
@@ -125,6 +125,7 @@ interface Stepper {
 | `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
 | `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
 | `com.propertee.task` | TaskRunner interface, DefaultTaskRunner (lightweight in-memory), deprecated TaskEngine. Task/TaskInfo/TaskObservation models, TaskStatus enum |
+| `com.propertee.platform` | PlatformProvider interface for host-gated OS access (file I/O, ENV). DefaultPlatformProvider (unrestricted), UnsupportedPlatformProvider (rejects all) |
 | `com.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
 
 **Application packages:**
@@ -139,7 +140,8 @@ interface Stepper {
 |---|---|
 | `propertee-core/grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn keys reuse the `access` rule (same as property access): `thread key:`, `thread "key":`, `thread 42:`, `thread $var:`, `thread $::var:`, `thread $(expr):`, `thread :` (unnamed). `arrayLiteral` has two alternatives: `RangeArray` (`[start..end]` or `[start..end, step]`) and `ListArray` (`[1, 2, 3]`). Object keys must be quoted strings or integers — bare identifiers are not allowed (`{"name": "Alice"}`, not `{name: "Alice"}`). |
 | `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `visitSpawnKeyStmt` resolves key from `access` context (StaticAccess, StringKeyAccess, ArrayAccess, VarEvalAccess, EvalAccess). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Integer keys on objects become string keys in `getProperty()`. `resolveAndValidateDynamicKey()` auto-coerces dynamic keys to string via `TO_STRING()` (empty treated as unnamed, no duplicates). |
-| `BuiltinFunctions.java` | 41 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, KEYS, SORT, SORT_DESC, SORT_BY, SORT_BY_DESC, REVERSE, RANDOM, MILTIME, DATE, TIME, SHELL, SHELL_CTX, START_TASK, TASK_STATUS, TASK_RESULT, WAIT_TASK, CANCEL_TASK, etc.). LEN supports strings, arrays, and objects. `registerExternal()` for sync I/O, `registerExternalAsync()` for async I/O (blocking calls on thread pool). `SHELL` and task functions use `TaskRunner` interface (was `TaskEngine`, now lightweight). `SHELL_CTX(cwd[, env])` creates a context config (sync via `registerExternal`). `SHELL(cmd)` or `SHELL(ctx, cmd)` executes shell commands (async via `registerExternalAsync`). `SHELL` auto-unwraps Result from `SHELL_CTX` — pass the Result directly, not `.value`. `PrintFunction` interface takes `Object[]` args, not `String` |
+| `BuiltinFunctions.java` | 64 built-in functions (PRINT, SUM, MAX, MIN, LEN, PUSH, SPLIT, JOIN, HAS_KEY, KEYS, SORT, SORT_DESC, SORT_BY, SORT_BY_DESC, REVERSE, RANDOM, MILTIME, DATE, TIME, SHELL, SHELL_CTX, START_TASK, TASK_STATUS, TASK_RESULT, WAIT_TASK, CANCEL_TASK, etc.). Internal registration uses private `registerResult()`/`registerResultAsync()`; host injection uses public `registerExternal()`/`registerExternalAsync()`. LEN supports strings, arrays, and objects. `registerExternal()` for sync I/O, `registerExternalAsync()` for async I/O (blocking calls on thread pool). `SHELL` and task functions use `TaskRunner` interface (was `TaskEngine`, now lightweight). `SHELL_CTX(cwd[, env])` creates a context config (sync via `registerExternal`). `SHELL(cmd)` or `SHELL(ctx, cmd)` executes shell commands (async via `registerExternalAsync`). `SHELL` auto-unwraps Result from `SHELL_CTX` — pass the Result directly, not `.value`. `PrintFunction` interface takes `Object[]` args, not `String` |
+| `PlatformProvider.java` | Interface for host-gated OS capabilities (ENV, file I/O). `DefaultPlatformProvider` provides unrestricted access; `UnsupportedPlatformProvider` rejects all calls. Hosts implement this to apply path restrictions, read-only policies, etc. |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
 | `ThreadContext.java` | Per-thread state: scope stack, global snapshot, sleep tracking, parent/child relationships, `resultCollection` (live map updated in-place by scheduler) |
 | `TypeChecker.java` | Runtime type checks, number formatting, value formatting |
@@ -460,6 +462,7 @@ visitor.setIgnoredFunctions(ignored);
 ## Conventions
 
 - **No null** — the language has no null keyword. Functions without `return` or with bare `return` produce `{}` (empty object). Missing function arguments default to `{}`.
+- **String escapes** — `\"`, `\\`, `\n`, `\t`, `\r` are processed in all string contexts (literals, object keys, property access). Unrecognized escapes like `\d` are preserved as-is.
 - **Java 7 target compatibility** — no lambdas, no streams, no Java 8 APIs. Use anonymous inner classes throughout. Build currently set to `-source 1.8 -target 1.8` for JDK 9+ compatibility; switch to `VERSION_1_7` when building with JDK 8.
 - **Collections** — use `LinkedHashMap<String, Object>` for objects (preserves insertion order), `ArrayList<Object>` for lists. The `Object` type represents all values at runtime.
 - `SLEEP()` returns a `SchedulerCommand` — the stepper yields it to the scheduler

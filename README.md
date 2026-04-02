@@ -91,6 +91,8 @@ else
 end
 ```
 
+Note: `registerExternal()` and `registerExternalAsync()` are the public API for host-injected functions. Core built-in functions use separate internal registration methods.
+
 ## Async External Functions
 
 For external functions that perform blocking I/O (database queries, HTTP calls), use `registerExternalAsync()` so other ProperTee threads can continue while the I/O completes:
@@ -213,6 +215,26 @@ Object result = scheduler.run(mainStepper);
 Map<String, Object> vars = interpreter.variables;
 ```
 
+### PlatformProvider (File I/O & ENV)
+
+Scripts can use file I/O and environment variable functions when the host provides a `PlatformProvider`:
+
+```java
+import com.propertee.platform.DefaultPlatformProvider;
+import com.propertee.platform.PlatformProvider;
+
+// Unrestricted access (CLI mode)
+BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, null, new DefaultPlatformProvider());
+ProperTeeInterpreter interpreter = new ProperTeeInterpreter(properties, stdout, stderr, 1000, "error", builtins);
+
+// Without provider — string/map/JSON/type work; ENV/file I/O return errors
+ProperTeeInterpreter restricted = new ProperTeeInterpreter(properties, stdout, stderr, 1000, "error");
+```
+
+Available via `PlatformProvider`: `ENV()`, `FILE_EXISTS()`, `FILE_INFO()`, `READ_LINES()`, `WRITE_FILE()`, `WRITE_LINES()`, `APPEND_FILE()`, `MKDIR()`, `LIST_DIR()`, `DELETE_FILE()`.
+
+Always available (no provider needed): `CONTAINS()`, `STARTS_WITH()`, `ENDS_WITH()`, `MATCHES()`, `REGEX_FIND()`, `REPLACE()`, `VALUES()`, `ENTRIES()`, `MERGE()`, `REMOVE_KEY()`, `TYPE_OF()`, `JSON_PARSE()`, `JSON_FORMAT()`.
+
 ### Integration Patterns
 
 #### Servlet / JSP Environment
@@ -282,7 +304,7 @@ scheduler.run(interp.createRootStepper(cachedTree));
 ### Safety and Limits
 
 - **Loop limit:** The `maxIterations` parameter prevents runaway loops. Set it based on your use case (default 1000).
-- **No file/network access:** Scripts have no I/O capabilities beyond `PRINT` and `SLEEP`. All data flows through properties and variables.
+- **Capability control:** File I/O and ENV functions require a `PlatformProvider` to be injected by the host. Without one, these functions return unsupported errors. Pure functions (string, map, JSON, type) are always available.
 - **Thread purity:** Thread functions cannot mutate global state. They read a snapshot taken at `multi` block entry, preventing race conditions.
 - **No reflection or class loading:** Scripts cannot access Java internals.
 
@@ -339,7 +361,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (79 test cases)
+./gradlew test           # JUnit tests (85 test cases)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs
