@@ -1043,7 +1043,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     public Object visitStringAtom(ProperTeeParser.StringAtomContext ctx) {
         String str = ctx.getText();
-        return str.substring(1, str.length() - 1);
+        return processStringEscapes(str.substring(1, str.length() - 1));
     }
 
     @Override
@@ -1077,7 +1077,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     private String resolveObjectKey(ProperTeeParser.ObjectKeyContext ctx) {
         if (ctx.STRING() != null) {
             String str = ctx.STRING().getText();
-            return str.substring(1, str.length() - 1);
+            return processStringEscapes(str.substring(1, str.length() - 1));
         }
         if (ctx.INTEGER() != null) return ctx.INTEGER().getText();
         return null;
@@ -1279,7 +1279,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     @Override
     public Object visitStringKeyAccess(ProperTeeParser.StringKeyAccessContext ctx) {
         String str = ctx.STRING().getText();
-        return str.substring(1, str.length() - 1);
+        return processStringEscapes(str.substring(1, str.length() - 1));
     }
 
     @Override
