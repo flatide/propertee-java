@@ -36,6 +36,11 @@ PRINT(groups.2)
 PRINT(groups.3)
 PRINT(groups.4)
 
+// REGEX_FIND - optional group not matched → {} (not "")
+opt = REGEX_FIND("b", "(a)?b")
+PRINT(opt.1)
+PRINT(opt.2 == {})
+
 // REPLACE
 PRINT(REPLACE("hello world", "world", "ProperTee"))
 PRINT(REPLACE("a-b-c", "-", "_"))

@@ -566,7 +566,7 @@ public class BuiltinFunctions {
                     List<Object> groups = new ArrayList<Object>();
                     for (int i = 0; i <= matcher.groupCount(); i++) {
                         String g = matcher.group(i);
-                        groups.add(g != null ? g : "");
+                        groups.add(g != null ? (Object) g : new LinkedHashMap<String, Object>());
                     }
                     return groups;
                 } catch (PatternSyntaxException e) {
@@ -718,12 +718,19 @@ public class BuiltinFunctions {
                 int start = 1;
                 int count = Integer.MAX_VALUE;
                 if (args.size() >= 2 && TypeChecker.isNumber(args.get(1))) {
-                    start = (int) TypeChecker.toDouble(args.get(1));
+                    double startD = TypeChecker.toDouble(args.get(1));
+                    if (!TypeChecker.isInteger(startD))
+                        return Result.error("READ_LINES() start must be an integer, got " + startD);
+                    start = (int) startD;
                 }
                 if (args.size() >= 3 && TypeChecker.isNumber(args.get(2))) {
-                    count = (int) TypeChecker.toDouble(args.get(2));
+                    double countD = TypeChecker.toDouble(args.get(2));
+                    if (!TypeChecker.isInteger(countD))
+                        return Result.error("READ_LINES() count must be an integer, got " + countD);
+                    count = (int) countD;
                 }
                 if (start < 1) return Result.error("READ_LINES() start must be >= 1");
+                if (count < 1) return Result.error("READ_LINES() count must be >= 1");
                 List<String> lines = platform.readLines((String) args.get(0), start, count);
                 return Result.ok(new ArrayList<Object>(lines));
             }

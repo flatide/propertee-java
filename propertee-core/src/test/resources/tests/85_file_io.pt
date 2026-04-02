@@ -24,6 +24,22 @@ PRINT(res.value.2)
 res = READ_LINES(::testDir + "/test.txt", 2, 1)
 PRINT(res.value.1)
 
+// READ_LINES - fractional start rejected
+res = READ_LINES(::testDir + "/test.txt", 1.9, 2)
+PRINT(res.ok)
+
+// READ_LINES - fractional count rejected
+res = READ_LINES(::testDir + "/test.txt", 1, 2.1)
+PRINT(res.ok)
+
+// READ_LINES - zero count rejected
+res = READ_LINES(::testDir + "/test.txt", 1, 0)
+PRINT(res.ok)
+
+// READ_LINES - negative count rejected
+res = READ_LINES(::testDir + "/test.txt", 1, -1)
+PRINT(res.ok)
+
 // WRITE_LINES
 WRITE_LINES(::testDir + "/lines.txt", ["alpha", "beta", "gamma"])
 res = READ_LINES(::testDir + "/lines.txt")
