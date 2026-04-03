@@ -49,6 +49,9 @@ task compileJava7(type: JavaCompile) {
     sourceCompatibility = '1.7'
     targetCompatibility = '1.7'
     options.encoding = 'UTF-8'
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
 }
 
 task runAsyncDemo(type: JavaExec) {
