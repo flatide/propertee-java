@@ -34,7 +34,8 @@ public class Repl {
         System.out.println("Type ProperTee statements. Multi-line blocks auto-detected (do/end, if/end, multi/end).");
         System.out.println("Type .exit to quit, .vars to show variables.\n");
 
-        BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, new SimpleTaskRunner(), new DefaultPlatformProvider());
+        SimpleTaskRunner taskRunner = new SimpleTaskRunner();
+        BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, taskRunner, new DefaultPlatformProvider());
         ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, maxIterations, iterationLimitBehavior, builtins);
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -96,6 +97,7 @@ public class Repl {
             // exit
         } finally {
             visitor.builtins.shutdown();
+            taskRunner.shutdown();
         }
 
         System.out.println("\nBye.");

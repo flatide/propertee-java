@@ -134,7 +134,8 @@ public class Main {
                 return;
             }
 
-            BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, new SimpleTaskRunner(), new DefaultPlatformProvider());
+            SimpleTaskRunner taskRunner = new SimpleTaskRunner();
+            BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, taskRunner, new DefaultPlatformProvider());
             ProperTeeInterpreter visitor = new ProperTeeInterpreter(properties, stdout, stderr, maxIterations, iterationLimitBehavior, builtins);
             Scheduler scheduler = new Scheduler(visitor);
             Stepper mainStepper = visitor.createRootStepper(tree);
@@ -146,6 +147,7 @@ public class Main {
                 System.exit(1);
             } finally {
                 visitor.builtins.shutdown();
+                taskRunner.shutdown();
             }
         } else {
             // REPL mode

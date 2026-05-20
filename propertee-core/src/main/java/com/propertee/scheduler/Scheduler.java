@@ -151,6 +151,26 @@ public class Scheduler {
         return min == Long.MAX_VALUE ? null : Math.max(0, min);
     }
 
+    /**
+     * Release a completed/error thread's state and remove from the active map.
+     * Main thread (id == 0) is retained so its result/error can be returned by run().
+     * Child threads' data has already been transferred to parent.resultCollection
+     * via notifyChildCompleted, so they can be safely dropped here.
+     */
+    private void releaseCompletedThread(ThreadContext thread) {
+        if (thread == null || thread.id == 0) return;
+        if (thread.state != ThreadState.COMPLETED && thread.state != ThreadState.ERROR) return;
+        thread.clearAsyncState();
+        // Drop large transient state to help GC; result was already transferred to parent.
+        thread.scopeStack = null;
+        thread.globalSnapshot = null;
+        thread.resultCollection = null;
+        thread.localScope = null;
+        thread.collectedResults = null;
+        thread.stepper = null;
+        threads.remove(thread.id);
+    }
+
     private void processStepResult(ThreadContext thread, StepResult stepResult) {
         if (stepResult.isBoundary()) {
             thread.markReady();
@@ -183,6 +203,7 @@ public class Scheduler {
             thread.markCompleted(stepResult.getValue());
             notifyChildCompleted(thread);
             notifyThreadCompleted(thread);
+            releaseCompletedThread(thread);
             return;
         }
 
@@ -404,6 +425,7 @@ public class Scheduler {
                 }
                 // Print child thread errors to stderr
                 visitor.stderr.print(new Object[]{"[THREAD ERROR] " + error.getMessage()});
+                releaseCompletedThread(thread);
             }
         }
 

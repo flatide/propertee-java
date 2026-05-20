@@ -869,7 +869,12 @@ public class BuiltinFunctions {
                     if (completed == null) {
                         return Result.error("Unknown task: " + task.taskId);
                     }
-                    return buildTaskResult(completed);
+                    Object result = buildTaskResult(completed);
+                    // Allow lightweight runners to free in-memory task state now
+                    // that the result has been extracted. Persistent runners
+                    // (TeeBox ManagedTaskEngine) treat this as a no-op.
+                    taskRunner.releaseTask(task.taskId);
+                    return result;
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return Result.error("interrupted");
@@ -983,6 +988,8 @@ public class BuiltinFunctions {
             asyncExecutor = null;
             ownedExecutor = false;
         }
+        // NOTE: taskRunner is host-provided; do NOT shut it down here.
+        // Hosts (CLI/REPL/TeeBox) own its lifecycle and must close it themselves.
     }
 
     private static TaskRunner createDefaultTaskRunner() {

@@ -61,6 +61,11 @@ public class UnsupportedTaskRunner implements TaskRunner {
     }
 
     @Override
+    public void releaseTask(String taskId) {
+        // no-op — no state to release
+    }
+
+    @Override
     public void shutdown() {
         // no-op
     }

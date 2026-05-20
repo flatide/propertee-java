@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Runs shell commands via /bin/sh -c and captures stdout/stderr.
  */
 public class SimpleTaskRunner implements TaskRunner {
+    private static final int MAX_OUTPUT_BYTES = 1024 * 1024; // 1 MB cap per stream
     private final Map<String, TaskState> tasks = new ConcurrentHashMap<String, TaskState>();
     private int nextId = 1;
 
@@ -18,10 +19,12 @@ public class SimpleTaskRunner implements TaskRunner {
         final String command;
         final long startTime;
         Process process;
-        String stdout = "";
-        String stderr = "";
+        final StringBuilder stdout = new StringBuilder();
+        final StringBuilder stderr = new StringBuilder();
+        Thread stdoutDrainer;
+        Thread stderrDrainer;
         Integer exitCode;
-        boolean alive = true;
+        volatile boolean alive = true;
 
         TaskState(String taskId, String command) {
             this.taskId = taskId;
@@ -52,10 +55,15 @@ public class SimpleTaskRunner implements TaskRunner {
                 pb.redirectErrorStream(true);
             }
             state.process = pb.start();
+            // Start drainer threads immediately to prevent OS pipe deadlock
+            state.stdoutDrainer = startDrainer(state.process.getInputStream(), state.stdout, "drain-stdout-" + taskId);
+            if (!request.mergeErrorToStdout) {
+                state.stderrDrainer = startDrainer(state.process.getErrorStream(), state.stderr, "drain-stderr-" + taskId);
+            }
         } catch (IOException e) {
             state.alive = false;
             state.exitCode = -1;
-            state.stderr = e.getMessage();
+            state.stderr.append(e.getMessage());
         }
 
         tasks.put(taskId, state);
@@ -133,13 +141,10 @@ public class SimpleTaskRunner implements TaskRunner {
         TaskState state = tasks.get(taskId);
         if (state == null) return "";
         String out = readOutput(state, false);
-        if (!state.stderr.isEmpty()) {
-            String err = readOutput(state, true);
-            if (!err.isEmpty()) {
-                out = out.isEmpty() ? err : out + "\n" + err;
-            }
-        }
-        return out;
+        String err = readOutput(state, true);
+        if (err.length() == 0) return out;
+        if (out.length() == 0) return err;
+        return out + "\n" + err;
     }
 
     @Override
@@ -157,11 +162,25 @@ public class SimpleTaskRunner implements TaskRunner {
     }
 
     @Override
+    public void releaseTask(String taskId) {
+        if (taskId == null) return;
+        TaskState state = tasks.remove(taskId);
+        if (state != null) {
+            // Cancel drainers and clear process reference to release native resources
+            joinQuietly(state.stdoutDrainer, 100);
+            joinQuietly(state.stderrDrainer, 100);
+            state.process = null;
+        }
+    }
+
+    @Override
     public void shutdown() {
         for (TaskState state : tasks.values()) {
             if (state.process != null && state.alive) {
                 state.process.destroyForcibly();
             }
+            joinQuietly(state.stdoutDrainer, 200);
+            joinQuietly(state.stderrDrainer, 200);
         }
         tasks.clear();
     }
@@ -172,10 +191,9 @@ public class SimpleTaskRunner implements TaskRunner {
             if (!state.process.isAlive()) {
                 state.exitCode = state.process.exitValue();
                 state.alive = false;
-                state.stdout = drain(state.process.getInputStream());
-                if (state.process.getErrorStream() != null) {
-                    state.stderr = drain(state.process.getErrorStream());
-                }
+                // Wait briefly for drainer threads to finish reading remaining output
+                joinQuietly(state.stdoutDrainer, 500);
+                joinQuietly(state.stderrDrainer, 500);
             }
         } catch (Exception e) {
             // ignore
@@ -184,7 +202,46 @@ public class SimpleTaskRunner implements TaskRunner {
 
     private String readOutput(TaskState state, boolean isStderr) {
         checkProcess(state);
-        return isStderr ? state.stderr : state.stdout;
+        StringBuilder buf = isStderr ? state.stderr : state.stdout;
+        synchronized (buf) {
+            return buf.toString();
+        }
+    }
+
+    private static Thread startDrainer(final InputStream is, final StringBuilder buf, String name) {
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    byte[] tmp = new byte[4096];
+                    int len;
+                    while ((len = is.read(tmp)) != -1) {
+                        synchronized (buf) {
+                            int room = MAX_OUTPUT_BYTES - buf.length();
+                            if (room <= 0) continue; // drain & discard once cap hit
+                            int writeLen = Math.min(len, room);
+                            buf.append(new String(tmp, 0, writeLen, "UTF-8"));
+                        }
+                    }
+                } catch (IOException ignore) {
+                    // stream closed
+                } finally {
+                    try { is.close(); } catch (IOException ignore) {}
+                }
+            }
+        }, name);
+        t.setDaemon(true);
+        t.start();
+        return t;
+    }
+
+    private static void joinQuietly(Thread t, long timeoutMs) {
+        if (t == null) return;
+        try {
+            t.join(timeoutMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private Task toTask(TaskState state) {
@@ -200,17 +257,4 @@ public class SimpleTaskRunner implements TaskRunner {
         return task;
     }
 
-    private static String drain(InputStream is) {
-        try {
-            StringBuilder sb = new StringBuilder();
-            byte[] buf = new byte[4096];
-            int len;
-            while ((len = is.read(buf)) != -1) {
-                sb.append(new String(buf, 0, len, "UTF-8"));
-            }
-            return sb.toString();
-        } catch (IOException e) {
-            return "";
-        }
-    }
 }
