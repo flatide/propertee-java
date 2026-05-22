@@ -1647,11 +1647,18 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         collectedSpawns = new ArrayList<SpawnSpec>();
         getScopeStack().push(new LinkedHashMap<String, Object>());
 
+        boolean setupSucceeded = false;
         try {
             evalBlock(ctx.block());
+            setupSucceeded = true;
         } finally {
             getScopeStack().pop();
             inMultiSetup = false;
+            // If setup threw, drop collected spawns so failed multi state
+            // doesn't survive in the interpreter (REPL/embedded scenarios).
+            if (!setupSucceeded) {
+                collectedSpawns = null;
+            }
         }
 
         // If no spawns were collected, assign empty map if result var specified
@@ -1668,71 +1675,72 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             return null;
         }
 
-        // Resolve auto-keys for unnamed threads and check for collisions
-        Set<String> allKeys = new LinkedHashSet<String>();
-        int autoPos = 1;
-        for (int i = 0; i < collectedSpawns.size(); i++) {
-            SpawnSpec spawn = collectedSpawns.get(i);
-            if (spawn.resultKey != null) {
-                allKeys.add(spawn.resultKey);
-            }
-        }
-        for (int i = 0; i < collectedSpawns.size(); i++) {
-            SpawnSpec spawn = collectedSpawns.get(i);
-            if (spawn.resultKey == null) {
-                String autoKey = "#" + autoPos;
-                if (allKeys.contains(autoKey)) {
-                    throw createError("Auto-generated key '" + autoKey + "' conflicts with an explicit key in multi block", spawn.ctx);
-                }
-                allKeys.add(autoKey);
-                // Update the spawn's resultKey by replacing the entry
-                collectedSpawns.set(i, new SpawnSpec(spawn.funcName, spawn.args, autoKey, spawn.ctx));
-                autoPos++;
-            }
-        }
-
-        // Build thread specs from collected spawns
+        // Resolve auto-keys and build thread specs in a try/finally to ensure
+        // collectedSpawns is dropped even if validation/build throws.
         List<String> resultKeyNames = new ArrayList<String>();
         List<SchedulerCommand.ThreadSpec> specs = new ArrayList<SchedulerCommand.ThreadSpec>();
-
-        for (int i = 0; i < collectedSpawns.size(); i++) {
-            SpawnSpec spawn = collectedSpawns.get(i);
-            resultKeyNames.add(spawn.resultKey);
-
-            if (userDefinedFunctions.containsKey(spawn.funcName)) {
-                FunctionDef funcDef = userDefinedFunctions.get(spawn.funcName);
-                List<String> params = funcDef.getParams();
-
-                // Argument count validation
-                if (spawn.args.size() > params.size()) {
-                    throw createError(
-                        "Function '" + spawn.funcName + "' expects " + params.size() + " argument(s), but " + spawn.args.size() + " were provided",
-                        spawn.ctx);
+        try {
+            Set<String> allKeys = new LinkedHashSet<String>();
+            int autoPos = 1;
+            for (int i = 0; i < collectedSpawns.size(); i++) {
+                SpawnSpec spawn = collectedSpawns.get(i);
+                if (spawn.resultKey != null) {
+                    allKeys.add(spawn.resultKey);
                 }
-
-                Map<String, Object> localScope = new LinkedHashMap<String, Object>();
-                for (int j = 0; j < params.size(); j++) {
-                    localScope.put(params.get(j), j < spawn.args.size() ? TypeChecker.deepCopy(spawn.args.get(j)) : new LinkedHashMap<String, Object>());
-                }
-
-                Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);
-                specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
-
-            } else if (builtins.has(spawn.funcName)) {
-                // Check function ignore list
-                if (ignoredFunctions.contains(spawn.funcName)) {
-                    throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
-                }
-                // Built-in function: execute immediately and wrap result
-                Object builtinResult = builtins.get(spawn.funcName).call(spawn.args);
-                Stepper immediateStepper = new ImmediateStepper(builtinResult);
-                specs.add(new SchedulerCommand.ThreadSpec("builtin-" + spawn.funcName + "-" + i, immediateStepper, null));
-            } else {
-                throw createError("Unknown function '" + spawn.funcName + "'", spawn.ctx);
             }
-        }
+            for (int i = 0; i < collectedSpawns.size(); i++) {
+                SpawnSpec spawn = collectedSpawns.get(i);
+                if (spawn.resultKey == null) {
+                    String autoKey = "#" + autoPos;
+                    if (allKeys.contains(autoKey)) {
+                        throw createError("Auto-generated key '" + autoKey + "' conflicts with an explicit key in multi block", spawn.ctx);
+                    }
+                    allKeys.add(autoKey);
+                    // Update the spawn's resultKey by replacing the entry
+                    collectedSpawns.set(i, new SpawnSpec(spawn.funcName, spawn.args, autoKey, spawn.ctx));
+                    autoPos++;
+                }
+            }
 
-        collectedSpawns = null;
+            for (int i = 0; i < collectedSpawns.size(); i++) {
+                SpawnSpec spawn = collectedSpawns.get(i);
+                resultKeyNames.add(spawn.resultKey);
+
+                if (userDefinedFunctions.containsKey(spawn.funcName)) {
+                    FunctionDef funcDef = userDefinedFunctions.get(spawn.funcName);
+                    List<String> params = funcDef.getParams();
+
+                    // Argument count validation
+                    if (spawn.args.size() > params.size()) {
+                        throw createError(
+                            "Function '" + spawn.funcName + "' expects " + params.size() + " argument(s), but " + spawn.args.size() + " were provided",
+                            spawn.ctx);
+                    }
+
+                    Map<String, Object> localScope = new LinkedHashMap<String, Object>();
+                    for (int j = 0; j < params.size(); j++) {
+                        localScope.put(params.get(j), j < spawn.args.size() ? TypeChecker.deepCopy(spawn.args.get(j)) : new LinkedHashMap<String, Object>());
+                    }
+
+                    Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);
+                    specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
+
+                } else if (builtins.has(spawn.funcName)) {
+                    // Check function ignore list
+                    if (ignoredFunctions.contains(spawn.funcName)) {
+                        throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
+                    }
+                    // Built-in function: execute immediately and wrap result
+                    Object builtinResult = builtins.get(spawn.funcName).call(spawn.args);
+                    Stepper immediateStepper = new ImmediateStepper(builtinResult);
+                    specs.add(new SchedulerCommand.ThreadSpec("builtin-" + spawn.funcName + "-" + i, immediateStepper, null));
+                } else {
+                    throw createError("Unknown function '" + spawn.funcName + "'", spawn.ctx);
+                }
+            }
+        } finally {
+            collectedSpawns = null;
+        }
 
         // Monitor spec
         SchedulerCommand.MonitorSpec monitorSpec = null;

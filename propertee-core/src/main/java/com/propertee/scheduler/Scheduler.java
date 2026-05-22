@@ -364,6 +364,7 @@ public class Scheduler {
         ThreadContext mainThread = createThread("main", mainStepper, visitor.variables);
         notifyThreadCreated(mainThread);
 
+        try {
         while (hasActiveThreads()) {
             long now = System.currentTimeMillis();
 
@@ -429,14 +430,30 @@ public class Scheduler {
             }
         }
 
-        // Clear active thread
-        visitor.activeThread = null;
-
         ThreadContext main = threads.get(0);
         if (main != null && main.state == ThreadState.ERROR) {
             Throwable e = main.error;
             throw (e instanceof RuntimeException) ? (RuntimeException) e : new RuntimeException(e);
         }
         return main != null ? main.result : null;
+        } finally {
+            // Always clear active thread reference and drop main thread state
+            // so the interpreter (long-lived in REPL/embedded) doesn't pin
+            // failed-run ThreadContext/Stepper/globalSnapshot.
+            visitor.activeThread = null;
+            ThreadContext mainCtx = threads.get(0);
+            if (mainCtx != null) {
+                mainCtx.clearAsyncState();
+                mainCtx.scopeStack = null;
+                mainCtx.globalSnapshot = null;
+                mainCtx.resultCollection = null;
+                mainCtx.localScope = null;
+                mainCtx.collectedResults = null;
+                mainCtx.stepper = null;
+            }
+            // Clear any straggler child threads that may have survived
+            threads.clear();
+            monitors.clear();
+        }
     }
 }
