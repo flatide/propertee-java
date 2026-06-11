@@ -1000,9 +1000,18 @@ public class BuiltinFunctions {
 
     public void shutdown() {
         if (ownedExecutor && asyncExecutor != null) {
-            asyncExecutor.shutdownNow();
+            ExecutorService executor = asyncExecutor;
             asyncExecutor = null;
             ownedExecutor = false;
+            executor.shutdownNow();
+            // Give async tasks a short window to release captured args / closures.
+            // Tasks that ignore interruption stay orphaned, but this bounds the
+            // common case where I/O respects Thread.interrupted().
+            try {
+                executor.awaitTermination(2L, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
         }
         // NOTE: taskRunner is host-provided; do NOT shut it down here.
         // Hosts (CLI/REPL/TeeBox) own its lifecycle and must close it themselves.
