@@ -16,6 +16,14 @@ public interface TaskRunner {
     String getStdout(String taskId);
     String getStderr(String taskId);
     String getCombinedOutput(String taskId);
+
+    /**
+     * Bounded variant: returns at most the last {@code maxBytes} bytes of combined
+     * output, decoded as UTF-8. Implementations SHOULD avoid loading more than
+     * {@code maxBytes} into heap. Used by SHELL()/RUN()-style builtins so a process
+     * with multi-GB stdout cannot OOM the JVM that captures its result.
+     */
+    String getCombinedOutput(String taskId, int maxBytes);
     Integer getExitCode(String taskId);
     Map<String, Object> getStatusMap(String taskId);
     /**

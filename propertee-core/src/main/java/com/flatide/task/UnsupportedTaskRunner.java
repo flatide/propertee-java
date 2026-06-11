@@ -51,6 +51,11 @@ public class UnsupportedTaskRunner implements TaskRunner {
     }
 
     @Override
+    public String getCombinedOutput(String taskId, int maxBytes) {
+        throw new UnsupportedOperationException(MESSAGE);
+    }
+
+    @Override
     public Integer getExitCode(String taskId) {
         throw new UnsupportedOperationException(MESSAGE);
     }

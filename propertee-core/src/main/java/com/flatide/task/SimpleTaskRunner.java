@@ -148,6 +148,15 @@ public class SimpleTaskRunner implements TaskRunner {
     }
 
     @Override
+    public String getCombinedOutput(String taskId, int maxBytes) {
+        // SimpleTaskRunner's in-memory buffer is already capped (1MB per stream),
+        // so the full read is bounded. Trim to the tail if the caller wants less.
+        String combined = getCombinedOutput(taskId);
+        if (maxBytes <= 0 || combined.length() <= maxBytes) return combined;
+        return combined.substring(combined.length() - maxBytes);
+    }
+
+    @Override
     public Integer getExitCode(String taskId) {
         TaskState state = tasks.get(taskId);
         if (state == null) return null;

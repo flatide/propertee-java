@@ -53,6 +53,22 @@ public class BuiltinFunctions {
     private static final ThreadLocal<Integer> asyncOriginThreadId = new ThreadLocal<Integer>();
     private static final ThreadLocal<String> asyncOriginThreadName = new ThreadLocal<String>();
 
+    // Cap the bytes SHELL()/RUN() return into script heap. Defends against
+    // a child process emitting multi-GB stdout that would OOM the JVM that
+    // is capturing the result. Configurable via system property.
+    private static final int SHELL_OUTPUT_CAP_BYTES = parsePositiveInt(
+            System.getProperty("propertee.maxShellOutputBytes"), 16 * 1024 * 1024);
+
+    private static int parsePositiveInt(String value, int defaultValue) {
+        if (value == null) return defaultValue;
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return parsed > 0 ? parsed : defaultValue;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
     public BuiltinFunctions(PrintFunction stdout, PrintFunction stderr) {
         this(stdout, stderr, null, null, null);
     }
@@ -1108,7 +1124,7 @@ public class BuiltinFunctions {
             return Result.running();
         }
 
-        String output = normalizeOutput(taskRunner.getCombinedOutput(task.taskId));
+        String output = normalizeOutput(taskRunner.getCombinedOutput(task.taskId, SHELL_OUTPUT_CAP_BYTES));
         Integer exitCode = taskRunner.getExitCode(task.taskId);
         if (exitCode != null && exitCode.intValue() == 0) {
             return Result.ok(output);
