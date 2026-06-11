@@ -4,7 +4,7 @@ plugins {
     id 'maven-publish'
 }
 
-group = 'com.propertee'
+group = 'com.flatide'
 version = '0.4.0'
 
 publishing {
@@ -35,7 +35,7 @@ sourceSets {
 }
 
 generateGrammarSource {
-    arguments += ['-visitor', '-no-listener', '-package', 'com.propertee.parser']
+    arguments += ['-visitor', '-no-listener', '-package', 'com.flatide.parser']
     outputDirectory = file("${project.buildDir}/generated-src/antlr/main")
 }
 
@@ -57,7 +57,7 @@ task compileJava7(type: JavaCompile) {
 task runAsyncDemo(type: JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'com.propertee.tests.AsyncDemo'
+    mainClass = 'com.flatide.tests.AsyncDemo'
     standardInput = System.in
     description = 'Run async external functions demo'
     group = 'application'

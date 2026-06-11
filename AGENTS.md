@@ -1,9 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Core Java sources live in `src/main/java/com/propertee/...` with packages split by concern: `cli`, `interpreter`, `runtime`, `scheduler`, and `stepper`.
+- Core Java sources live in `src/main/java/com/flatide/...` with packages split by concern: `cli`, `interpreter`, `runtime`, `scheduler`, and `stepper`.
 - Grammar source is `grammar/ProperTee.g4`; generated ANTLR files are written to `build/generated-src/antlr/main` during build.
-- Unit/integration harness code is in `src/test/java/com/propertee/tests`.
+- Unit/integration harness code is in `src/test/java/com/flatide/tests`.
 - Script-based regression fixtures are in `src/test/resources/tests` as `.tee` + matching `.expected` file pairs.
 - Supporting docs and runnable examples: `README.md`, `LANGUAGE.md`, `GUIDE.md`, `sample/`, and `demo/`.
 

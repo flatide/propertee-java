@@ -21,7 +21,7 @@ Examples:
   scripts/remote-linux-test.sh user@linux-host
   REMOTE_TEST_PROFILE=all-core \
     scripts/remote-linux-test.sh user@linux-host /tmp/propertee-ci
-  REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.propertee.tests.ScriptTest.testScript[79_task_cancel]' \
+  REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest.testScript[79_task_cancel]' \
     scripts/remote-linux-test.sh user@linux-host /tmp/propertee-ci
 EOF
 }
@@ -48,10 +48,10 @@ REMOTE_TEST_PROFILE="${REMOTE_TEST_PROFILE:-linux-regression}"
 default_test_command() {
     case "$REMOTE_TEST_PROFILE" in
         linux-regression)
-            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.propertee.tests.ScriptTest.testScript[79_task_cancel] --tests com.propertee.tests.TaskEngineTest"
+            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest.testScript[79_task_cancel] --tests com.flatide.tests.TaskEngineTest"
             ;;
         all-core)
-            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.propertee.tests.ScriptTest --tests com.propertee.tests.TaskEngineTest"
+            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest --tests com.flatide.tests.TaskEngineTest"
             ;;
         *)
             echo "Unknown REMOTE_TEST_PROFILE: $REMOTE_TEST_PROFILE" >&2

@@ -15,7 +15,7 @@ Multi-module Gradle project with three subprojects:
 | `propertee-core` | Language runtime: interpreter, scheduler, stepper, builtins, TaskRunner, platform provider, ANTLR grammar | — |
 | `propertee-cli` | CLI runner (`Main.java`) and interactive REPL (`Repl.java`) | `propertee-core` |
 
-Source layout: `propertee-{module}/src/main/java/com/propertee/{package}/`. Grammar at `propertee-core/grammar/ProperTee.g4`. Tests at `propertee-core/src/test/`.
+Source layout: `propertee-{module}/src/main/java/com/flatide/{package}/`. Grammar at `propertee-core/grammar/ProperTee.g4`. Tests at `propertee-core/src/test/`.
 
 ## Build Commands
 
@@ -62,10 +62,10 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./gradlew test
 
 # Run a single script test by name (parameterized test filter)
-./gradlew :propertee-core:test --tests "com.propertee.tests.ScriptTest.testScript[09_functions]"
+./gradlew :propertee-core:test --tests "com.flatide.tests.ScriptTest.testScript[09_functions]"
 
 # Run only TaskEngine tests
-./gradlew :propertee-core:test --tests "com.propertee.tests.TaskEngineTest"
+./gradlew :propertee-core:test --tests "com.flatide.tests.TaskEngineTest"
 
 # Run all tests via shell script (compares JAR output against .expected files)
 ./test_all.sh
@@ -120,19 +120,19 @@ interface Stepper {
 
 | Package | Role |
 |---|---|
-| `com.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1800 lines), built-in functions, scope management, function definitions |
-| `com.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
-| `com.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
-| `com.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
-| `com.propertee.task` | TaskRunner interface, DefaultTaskRunner (lightweight in-memory), deprecated TaskEngine. Task/TaskInfo/TaskObservation models, TaskStatus enum |
-| `com.propertee.platform` | PlatformProvider interface for host-gated OS access (file I/O, ENV). DefaultPlatformProvider (unrestricted), UnsupportedPlatformProvider (rejects all) |
-| `com.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
+| `com.flatide.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1800 lines), built-in functions, scope management, function definitions |
+| `com.flatide.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
+| `com.flatide.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
+| `com.flatide.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
+| `com.flatide.task` | TaskRunner interface, DefaultTaskRunner (lightweight in-memory), deprecated TaskEngine. Task/TaskInfo/TaskObservation models, TaskStatus enum |
+| `com.flatide.platform` | PlatformProvider interface for host-gated OS access (file I/O, ENV). DefaultPlatformProvider (unrestricted), UnsupportedPlatformProvider (rejects all) |
+| `com.flatide.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
 
 **Application packages:**
 
 | Package | Module | Role |
 |---|---|---|
-| `com.propertee.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
+| `com.flatide.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
 
 ### Key Files
 
@@ -279,7 +279,7 @@ BLOCKED → READY                    (async future completed or timed out)
 
 `BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: loops catch break/continue, function call steppers catch return, statement-level steppers (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper) catch `AsyncPendingException` and return `AWAIT_ASYNC` command for retry.
 
-## TaskRunner (`com.propertee.task`)
+## TaskRunner (`com.flatide.task`)
 
 Manages detached shell processes for SHELL() builtin.
 

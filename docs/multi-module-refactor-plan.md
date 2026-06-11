@@ -15,28 +15,28 @@ The immediate objective is to remove dependencies from `teebox` to `cli` so the 
 ### `propertee-core`
 
 - `grammar/`
-- `com.propertee.parser`
-- `com.propertee.core`
-- `com.propertee.interpreter`
-- `com.propertee.runtime`
-- `com.propertee.scheduler`
-- `com.propertee.stepper`
-- `com.propertee.task`
+- `com.flatide.parser`
+- `com.flatide.core`
+- `com.flatide.interpreter`
+- `com.flatide.runtime`
+- `com.flatide.scheduler`
+- `com.flatide.stepper`
+- `com.flatide.task`
 
 ### `propertee-cli`
 
-- `com.propertee.cli`
+- `com.flatide.cli`
 
 ### `propertee-teebox`
 
-- `com.propertee.teebox`
+- `com.flatide.teebox`
 - `deploy/teebox`
 - `demo/teebox`
 
 ## Phase 0: Decouple Before Moving Files
 
 1. Introduce a parser facade in core:
-   - `com.propertee.core.ScriptParser`
+   - `com.flatide.core.ScriptParser`
 2. Replace `Main.parseScript()` usage in:
    - `teebox`
    - tests
