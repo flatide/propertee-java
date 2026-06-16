@@ -1,9 +1,13 @@
 name: Release Artifacts
 
+# Manual-only: this workflow does NOT run automatically on tag push.
+# Trigger it from the Actions tab (Run workflow) and supply the tag to release.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release (e.g. v0.7.0)'
+        required: true
 
 permissions:
   contents: write
@@ -15,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -38,7 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
+          TAG_NAME="${{ inputs.tag }}"
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" \
               --title "$TAG_NAME" \

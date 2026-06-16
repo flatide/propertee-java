@@ -469,7 +469,7 @@ visitor.setIgnoredFunctions(ignored);
 
 ## CI / Releases
 
-GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts on tag push (e.g., `git tag v0.7.0 && git push origin v0.7.0`). Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
+GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts. It is **manual-only** (`workflow_dispatch`) — it does **not** run automatically on tag push; trigger it from the Actions tab ("Run workflow") and supply the existing tag (e.g. `v0.7.0`) to build and release. Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
 
 ## Dependencies
 
