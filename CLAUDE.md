@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is (v0.4.0)
+## What This Is (v0.7.0)
 
 ProperTee Java is a Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language. It uses ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** (replacing the JavaScript generator-based approach from [propertee-js](https://github.com/flatide/propertee-js)). Every statement visitor produces a Stepper object; a central scheduler round-robins between threads at statement boundaries.
 
@@ -469,7 +469,7 @@ visitor.setIgnoredFunctions(ignored);
 
 ## CI / Releases
 
-GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts on tag push (e.g., `git tag v0.4.0 && git push origin v0.4.0`). Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
+GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts on tag push (e.g., `git tag v0.7.0 && git push origin v0.7.0`). Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
 
 ## Dependencies
 
