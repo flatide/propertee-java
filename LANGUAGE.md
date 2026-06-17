@@ -874,6 +874,20 @@ area = width * height    // 20000
 
 Properties are read-only and sit at the bottom of the variable lookup chain — any local or global variable with the same name takes precedence.
 
+### `_PROPS` — all inputs as one object
+
+Every injected property is also available as a member of the reserved object **`_PROPS`**, so a script can print, iterate, or pass along the whole input set at once while still reading each key directly:
+
+```
+PRINT(a)                      // individual key (as before)
+PRINT(_PROPS.a)               // same value via the object
+PRINT(JSON_FORMAT(_PROPS))    // {"a":40,"b":2}  — dump all inputs (debugging)
+FOR k IN KEYS(_PROPS) DO PRINT(k) END   // iterate input names
+return { "echo": _PROPS }     // forward all inputs to a caller/system
+```
+
+`_PROPS` is a snapshot of the inputs (it does not contain itself, so `JSON_FORMAT(_PROPS)` is safe). Inside a function or `multi` setup it follows the same rule as other properties — use `::_PROPS`. If an input is literally named `_PROPS`, that caller-supplied value is used as-is.
+
 ## External Functions and the Result Pattern
 
 Host applications can register custom functions. These use the **Result pattern** for error handling instead of throwing runtime errors:
@@ -1073,6 +1087,10 @@ Common error conditions:
 ---
 
 ## Changelog
+
+### v0.7.0
+
+- **`_PROPS` reserved object**: all host-injected properties are now also reachable as one object, `_PROPS` (e.g. `PRINT(_PROPS)`, `JSON_FORMAT(_PROPS)`, `KEYS(_PROPS)`, `_PROPS.a`), so a script can dump/iterate/forward the whole input set while individual keys remain directly accessible. Use `::_PROPS` inside functions/`multi` setup. A caller-supplied `_PROPS` input is left as-is.
 
 ### v0.4.0
 

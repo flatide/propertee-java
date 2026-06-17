@@ -89,7 +89,20 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public ProperTeeInterpreter(Map<String, Object> properties, BuiltinFunctions.PrintFunction stdout,
                                  BuiltinFunctions.PrintFunction stderr, int maxIterations, String iterationLimitBehavior,
                                  BuiltinFunctions builtins) {
-        this.properties = properties != null ? properties : new LinkedHashMap<String, Object>();
+        Map<String, Object> incoming = properties != null ? properties : new LinkedHashMap<String, Object>();
+        // Reserved `_PROPS`: the full input set exposed as one object, so a script can print,
+        // iterate, or pass along ALL inputs at once (PRINT(_PROPS), KEYS(_PROPS),
+        // JSON_FORMAT(_PROPS), _PROPS.a ...) while each key also stays directly accessible as a
+        // bare variable (a, b, ...). The interpreter keeps its own props view so the caller's map
+        // is never mutated, and `_PROPS` holds a (shallow) snapshot that does not contain itself
+        // (so JSON_FORMAT(_PROPS) cannot recurse). A caller-supplied `_PROPS` key is left as-is.
+        if (incoming.containsKey("_PROPS")) {
+            this.properties = incoming;
+        } else {
+            Map<String, Object> view = new LinkedHashMap<String, Object>(incoming);
+            view.put("_PROPS", new LinkedHashMap<String, Object>(incoming));
+            this.properties = view;
+        }
         this.stdout = stdout;
         this.stderr = stderr;
         this.maxIterations = maxIterations;

@@ -101,7 +101,8 @@ public class ScriptTest {
             "82_map_extensions",
             "83_type_env",
             "84_json",
-            "85_file_io"
+            "85_file_io",
+            "86_props_object"
         };
 
         for (String name : testNames) {
@@ -126,6 +127,10 @@ public class ScriptTest {
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
+            }
+            if ("86_props_object".equals(name)) {
+                props.put("a", 40);
+                props.put("b", 2);
             }
 
             tests.add(new Object[]{name, script, expected, props});
