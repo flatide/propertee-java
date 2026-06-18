@@ -114,6 +114,8 @@ interface Stepper {
 - `StepResult.command(cmd)` = scheduler command (SLEEP, SPAWN_THREADS, AWAIT_ASYNC)
 - `StepResult.done(value)` = stepper completed with result
 
+**Limitation — nested eager path is a blocking fallback.** Cooperative suspension (`SchedulerCommand`, e.g. `SLEEP`) only yields to the scheduler at the *statement-stepper* level. Loop / function / `if` bodies run eagerly through `evalBlock`/`callUserFunction`, which cannot suspend mid-construct. So a `SLEEP` inside such a body is honored with a **blocking `Thread.sleep` fallback** (`ProperTeeInterpreter.evalBlock`) rather than a cooperative yield — correct timing, but it blocks the scheduler thread for that sleep (single-threaded scripts are unaffected; top-level and directly-spawned-worker SLEEP stay cooperative — the latter via `CommandThenDoneStepper`). The full cooperative fix (stepper-driven loops/functions, matching propertee-js) is tracked separately. Regression coverage: `SleepNestingTest`.
+
 ### Package Structure
 
 **Core packages** (in `propertee-core`):

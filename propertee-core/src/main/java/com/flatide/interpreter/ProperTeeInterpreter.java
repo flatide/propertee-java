@@ -753,8 +753,32 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         Object result = null;
         for (ProperTeeParser.StatementContext stmt : ctx.statement()) {
             result = eval(stmt);
+            // The cooperative SchedulerCommand model only suspends at the top statement-stepper level.
+            // Inside eagerly-evaluated blocks (loop / function / if bodies, monitors) a returned SLEEP
+            // command would otherwise be silently discarded and the sleep would no-op. Honor it here
+            // with a blocking fallback so timing is correct. Trade-off: a nested SLEEP blocks the
+            // scheduler thread, so other cooperative threads do not advance during it (single-threaded
+            // scripts are unaffected; top-level SLEEP stays fully cooperative). See B-branch for the
+            // full cooperative fix.
+            if (result instanceof SchedulerCommand) {
+                SchedulerCommand cmd = (SchedulerCommand) result;
+                if (cmd.getType() == SchedulerCommand.CommandType.SLEEP) {
+                    sleepBlocking(cmd.getDuration());
+                    result = null;
+                }
+            }
         }
         return result;
+    }
+
+    /** Blocking sleep fallback for SLEEP commands honored on the eager (non-stepper) execution path. */
+    private void sleepBlocking(long ms) {
+        if (ms <= 0) return;
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // --- Loops ---
@@ -1505,9 +1529,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         ss.push(localScope);
 
         try {
-            for (ProperTeeParser.StatementContext stmt : funcDef.getBody().statement()) {
-                eval(stmt);
-            }
+            // Run the body via evalBlock so a SLEEP command in the body is honored (blocking fallback
+            // on this eager call path) instead of being silently discarded. ReturnException still
+            // propagates out to the catch below.
+            evalBlock(funcDef.getBody());
 
             // No explicit return: result is empty object
             return new LinkedHashMap<String, Object>();
@@ -1743,10 +1768,18 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     if (ignoredFunctions.contains(spawn.funcName)) {
                         throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
                     }
-                    // Built-in function: execute immediately and wrap result
+                    // Built-in function: execute immediately and wrap result. If it returns a
+                    // SchedulerCommand (e.g. SLEEP), yield that command to the scheduler so the worker
+                    // actually sleeps, instead of treating the command object as the thread's result.
                     Object builtinResult = builtins.get(spawn.funcName).call(spawn.args);
-                    Stepper immediateStepper = new ImmediateStepper(builtinResult);
-                    specs.add(new SchedulerCommand.ThreadSpec("builtin-" + spawn.funcName + "-" + i, immediateStepper, null));
+                    Stepper builtinStepper;
+                    if (builtinResult instanceof SchedulerCommand) {
+                        builtinStepper = new CommandThenDoneStepper(
+                            (SchedulerCommand) builtinResult, new LinkedHashMap<String, Object>());
+                    } else {
+                        builtinStepper = new ImmediateStepper(builtinResult);
+                    }
+                    specs.add(new SchedulerCommand.ThreadSpec("builtin-" + spawn.funcName + "-" + i, builtinStepper, null));
                 } else {
                     throw createError("Unknown function '" + spawn.funcName + "'", spawn.ctx);
                 }
