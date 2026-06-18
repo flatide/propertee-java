@@ -679,6 +679,8 @@ end
 
 Only meaningful inside functions running within a `multi` block.
 
+> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` only applies to `SLEEP` at a statement's top level (or directly spawned as a worker, e.g. `thread a: SLEEP(500)`). When `SLEEP` runs **inside a `loop`, function, `if`, or `monitor` body**, the Java implementation honors it with a **blocking** `Thread.sleep` fallback: the sleep duration is correct, but it blocks the scheduler thread, so other `multi` workers and `monitor` ticks do **not** advance during that sleep. (Before this fix, a nested `SLEEP` was silently ignored and returned instantly.) Single-threaded scripts are unaffected. A future release will make nested `SLEEP` fully cooperative (as the propertee-js runtime already is).
+
 ## Built-in Functions
 
 All built-in function names are UPPERCASE.
