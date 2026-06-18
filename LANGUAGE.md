@@ -882,7 +882,7 @@ Every injected property is also available as a member of the reserved object **`
 PRINT(a)                      // individual key (as before)
 PRINT(_PROPS.a)               // same value via the object
 PRINT(JSON_FORMAT(_PROPS))    // {"a":40,"b":2}  — dump all inputs (debugging)
-FOR k IN KEYS(_PROPS) DO PRINT(k) END   // iterate input names
+loop k in KEYS(_PROPS) do PRINT(k) end   // iterate input names
 return { "echo": _PROPS }     // forward all inputs to a caller/system
 ```
 
