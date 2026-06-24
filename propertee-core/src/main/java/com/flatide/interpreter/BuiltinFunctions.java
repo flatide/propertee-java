@@ -863,7 +863,8 @@ public class BuiltinFunctions {
                 if (args.size() < 2 || !(args.get(0) instanceof String)) {
                     return Result.error("HTTP_POST() requires (url, body, [options])");
                 }
-                String body = args.get(1) != null ? String.valueOf(args.get(1)) : "";
+                String body = coerceBody(args.get(1));
+                if (body == null) body = "";
                 Map<String, Object> options = (args.size() > 2 && args.get(2) instanceof Map)
                     ? (Map<String, Object>) args.get(2) : null;
                 return doHttp("POST", (String) args.get(0), optionsHeaders(options), body, optionsTimeout(options));
@@ -982,6 +983,7 @@ public class BuiltinFunctions {
     private static Map<String, String> optionsHeaders(Map<String, Object> options) {
         if (options == null) return null;
         Object h = options.get("headers");
+        if (!(h instanceof Map)) h = options.get("header");   // accept the common singular slip
         if (!(h instanceof Map)) return null;
         Map<String, String> result = new LinkedHashMap<String, String>();
         for (Map.Entry<String, Object> e : ((Map<String, Object>) h).entrySet()) {
@@ -990,11 +992,22 @@ public class BuiltinFunctions {
         return result;
     }
 
-    /** Extract a {@code body} string from an options map (used by the general HTTP function). */
+    /** Extract a {@code body} from an options map (used by the general HTTP function). */
     private static String optionsBody(Map<String, Object> options) {
         if (options == null) return null;
-        Object b = options.get("body");
-        return b != null ? String.valueOf(b) : null;
+        return coerceBody(options.get("body"));
+    }
+
+    /**
+     * Coerce an HTTP request body to a string. A String is sent as-is (the caller may pass
+     * pre-formatted text or JSON). Any other ProperTee value (object/array/number/boolean) is
+     * serialized as JSON — so {@code HTTP_POST(url, {"a": 1})} sends {@code {"a":1}}, not the Java
+     * {@code toString()} form {@code {a=1}}.
+     */
+    private static String coerceBody(Object body) {
+        if (body == null) return null;
+        if (body instanceof String) return (String) body;
+        return new Gson().toJson(properTeeToJson(body));
     }
 
     /** Extract a {@code timeout} (ms) from an options map; 0 if absent/invalid. */

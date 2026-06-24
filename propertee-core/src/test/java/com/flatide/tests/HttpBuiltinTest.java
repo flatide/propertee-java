@@ -114,4 +114,62 @@ public class HttpBuiltinTest {
         Assert.assertEquals("GEN true 200", out.get(3));
         Assert.assertEquals("BAD false 0 true", out.get(4));
     }
+
+    @Test
+    public void postObjectBodyIsJsonAndHeaderAliasIsAccepted() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/echo", new HttpHandler() {
+            public void handle(HttpExchange e) throws java.io.IOException {
+                InputStream in = e.getRequestBody();
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                byte[] c = new byte[1024];
+                int r;
+                while ((r = in.read(c)) != -1) bo.write(c, 0, r);
+                String reply = "body=" + bo.toString("UTF-8")
+                    + "|ct=" + e.getRequestHeaders().getFirst("Content-type")
+                    + "|runId=" + e.getRequestHeaders().getFirst("RUN-ID");
+                byte[] b = reply.getBytes("UTF-8");
+                e.sendResponseHeaders(200, b.length);
+                OutputStream o = e.getResponseBody();
+                o.write(b);
+                o.close();
+            }
+        });
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+
+        final List<String> out = new ArrayList<String>();
+        BuiltinFunctions.PrintFunction sink = new BuiltinFunctions.PrintFunction() {
+            public void print(Object[] args) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < args.length; i++) {
+                    if (i > 0) sb.append(" ");
+                    sb.append(args[i]);
+                }
+                out.add(sb.toString());
+            }
+        };
+        // Object body -> JSON ({"test":"ok"}, not {test=ok}); "header" (singular) alias is accepted.
+        String script =
+            "test = {\"test\": \"ok\"}\n" +
+            "opts = {\"header\": {\"Content-type\": \"application/json\", \"RUN-ID\": \"r123\"}}\n" +
+            "res = HTTP_POST(\"" + base + "/echo\", test, opts)\n" +
+            "PRINT(res.ok, res.value.body)\n";
+        try {
+            List<String> errors = new ArrayList<String>();
+            ProperTeeParser.RootContext tree = ScriptParser.parse(script, errors);
+            Assert.assertNotNull("parse failed: " + errors, tree);
+            BuiltinFunctions bf = new BuiltinFunctions(sink, sink, null, null, new DefaultPlatformProvider());
+            ProperTeeInterpreter v = new ProperTeeInterpreter(
+                new LinkedHashMap<String, Object>(), sink, sink, 1000, "error", bf);
+            try {
+                new Scheduler(v).run(v.createRootStepper(tree));
+            } finally {
+                bf.shutdown();
+            }
+        } finally {
+            server.stop(0);
+        }
+        Assert.assertEquals("true body={\"test\":\"ok\"}|ct=application/json|runId=r123", out.get(0));
+    }
 }

@@ -846,7 +846,9 @@ end
 | `HTTP_POST(url, body, [options])` | HTTP POST with a string `body`. Returns Result. |
 | `HTTP(method, url, [options])` | General request for any method (PUT/DELETE/PATCH/...). `options.body` carries the request body. |
 
-`options` is an object: `{"headers": {"Key": "Value", ...}, "timeout": <ms>, "body": "<for HTTP()>"}` — all optional.
+`options` is an object: `{"headers": {"Key": "Value", ...}, "timeout": <ms>, "body": <for HTTP()>}` — all optional. (`"header"` is also accepted for `"headers"`.)
+
+**Request body.** A string body is sent as-is; any other value (object/array/number/boolean) is serialized as JSON. So `HTTP_POST(url, {"a": 1})` sends `{"a":1}` (not the bare `a=1` form). Set `"Content-Type": "application/json"` in `headers` if the server requires it.
 
 **Result shape.** A request that completes returns `{status, body, headers}` as `value`, with `ok` true only for a 2xx status (4xx/5xx keep the full `value` with `ok` false). A transport-level failure (bad URL, DNS, connection refused, timeout) returns `ok` false with `value = {"status": 0, "body": "<error message>", "headers": {}}`. So `res.value` is always that object — check `res.ok` and `res.value.status`.
 
