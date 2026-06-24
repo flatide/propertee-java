@@ -1,4 +1,4 @@
-# ProperTee Language Specification v0.8.0
+# ProperTee Language Specification v0.9.0
 
 ## Overview
 
@@ -1113,6 +1113,10 @@ Common error conditions:
 ---
 
 ## Changelog
+
+### v0.9.0
+
+- **HTTP request body**: a non-string `HTTP_POST`/`HTTP` body (object/array/number/boolean) is now serialized as JSON (a string body is sent as-is). Previously an object body was sent via Java `toString()` (`{a=1}`), which servers rejected. Also accept `"header"` as an alias for `"headers"` in options.
 
 ### v0.8.0
 
