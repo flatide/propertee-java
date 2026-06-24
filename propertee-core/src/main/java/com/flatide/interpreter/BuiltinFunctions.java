@@ -825,6 +825,51 @@ public class BuiltinFunctions {
             }
         });
 
+        // HTTP — async (blocking network I/O runs off the scheduler thread, like SHELL).
+        // A completed request -> value = {status, body, headers}, ok = (2xx). A transport-level
+        // failure (bad URL, DNS, connect, timeout) -> ok=false with value = {status:0, body:<msg>,
+        // headers:{}}. So .value is always that map; check res.ok and res.value.status.
+        registerResultAsync("HTTP", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (args.size() < 2 || !(args.get(0) instanceof String) || !(args.get(1) instanceof String)) {
+                    return Result.error("HTTP() requires (method, url, [options])");
+                }
+                Map<String, Object> options = (args.size() > 2 && args.get(2) instanceof Map)
+                    ? (Map<String, Object>) args.get(2) : null;
+                return doHttp((String) args.get(0), (String) args.get(1),
+                    optionsHeaders(options), optionsBody(options), optionsTimeout(options));
+            }
+        }, 0, true);
+
+        registerResultAsync("HTTP_GET", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (args.isEmpty() || !(args.get(0) instanceof String)) {
+                    return Result.error("HTTP_GET() requires (url, [options])");
+                }
+                Map<String, Object> options = (args.size() > 1 && args.get(1) instanceof Map)
+                    ? (Map<String, Object>) args.get(1) : null;
+                return doHttp("GET", (String) args.get(0), optionsHeaders(options), null, optionsTimeout(options));
+            }
+        }, 0, true);
+
+        registerResultAsync("HTTP_POST", new BuiltinFunction() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public Object call(List<Object> args) {
+                if (args.size() < 2 || !(args.get(0) instanceof String)) {
+                    return Result.error("HTTP_POST() requires (url, body, [options])");
+                }
+                String body = args.get(1) != null ? String.valueOf(args.get(1)) : "";
+                Map<String, Object> options = (args.size() > 2 && args.get(2) instanceof Map)
+                    ? (Map<String, Object>) args.get(2) : null;
+                return doHttp("POST", (String) args.get(0), optionsHeaders(options), body, optionsTimeout(options));
+            }
+        }, 0, true);
+
         // SHELL_CTX — sync, creates a context config object
         registerResult("SHELL_CTX", new BuiltinFunction() {
             @Override
@@ -897,6 +942,67 @@ public class BuiltinFunctions {
                 }
             }
         }, 0, true);
+    }
+
+    // --- HTTP helpers ---
+
+    private Object doHttp(String method, String url, Map<String, String> headers, String body, int timeoutMs) {
+        Map<String, Object> value = new LinkedHashMap<String, Object>();
+        try {
+            PlatformProvider.HttpResponse resp = platform.httpRequest(method, url, headers, body, timeoutMs);
+            value.put("status", TypeChecker.boxNumber((double) resp.status));
+            value.put("body", resp.body != null ? resp.body : "");
+            Map<String, Object> hdrs = new LinkedHashMap<String, Object>();
+            if (resp.headers != null) {
+                for (Map.Entry<String, String> e : resp.headers.entrySet()) {
+                    hdrs.put(e.getKey(), e.getValue());
+                }
+            }
+            value.put("headers", hdrs);
+            boolean ok = resp.status >= 200 && resp.status < 300;
+            return httpEnvelope(ok, value);
+        } catch (Exception e) {
+            value.put("status", TypeChecker.boxNumber(0.0));
+            value.put("body", e.getMessage() != null ? e.getMessage() : "HTTP request failed");
+            value.put("headers", new LinkedHashMap<String, Object>());
+            return httpEnvelope(false, value);
+        }
+    }
+
+    private static Object httpEnvelope(boolean ok, Object value) {
+        Map<String, Object> r = new LinkedHashMap<String, Object>();
+        r.put("status", ok ? "done" : "error");
+        r.put("ok", Boolean.valueOf(ok));
+        r.put("value", value);
+        return r;
+    }
+
+    /** Extract a {@code headers} object from an options map into a String->String map (values coerced). */
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> optionsHeaders(Map<String, Object> options) {
+        if (options == null) return null;
+        Object h = options.get("headers");
+        if (!(h instanceof Map)) return null;
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, Object> e : ((Map<String, Object>) h).entrySet()) {
+            result.put(e.getKey(), e.getValue() != null ? String.valueOf(e.getValue()) : "");
+        }
+        return result;
+    }
+
+    /** Extract a {@code body} string from an options map (used by the general HTTP function). */
+    private static String optionsBody(Map<String, Object> options) {
+        if (options == null) return null;
+        Object b = options.get("body");
+        return b != null ? String.valueOf(b) : null;
+    }
+
+    /** Extract a {@code timeout} (ms) from an options map; 0 if absent/invalid. */
+    private static int optionsTimeout(Map<String, Object> options) {
+        if (options == null) return 0;
+        Object t = options.get("timeout");
+        if (t instanceof Number) return ((Number) t).intValue();
+        return 0;
     }
 
     public boolean has(String name) {

@@ -1,6 +1,8 @@
 package com.flatide.platform;
 
 import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.*;
 
 /**
@@ -159,5 +161,66 @@ public class DefaultPlatformProvider implements PlatformProvider {
         if (!file.delete()) {
             throw new RuntimeException("Failed to delete file: " + path);
         }
+    }
+
+    @Override
+    public HttpResponse httpRequest(String method, String url, Map<String, String> headers, String body, int timeoutMs) {
+        HttpURLConnection conn = null;
+        try {
+            URL u = new URL(url);
+            conn = (HttpURLConnection) u.openConnection();
+            conn.setRequestMethod(method != null ? method.toUpperCase() : "GET");
+            int t = timeoutMs > 0 ? timeoutMs : 30000;
+            conn.setConnectTimeout(t);
+            conn.setReadTimeout(t);
+            conn.setInstanceFollowRedirects(true);
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    if (e.getKey() != null) conn.setRequestProperty(e.getKey(), e.getValue());
+                }
+            }
+            if (body != null && body.length() > 0) {
+                conn.setDoOutput(true);
+                byte[] payload = body.getBytes("UTF-8");
+                OutputStream os = conn.getOutputStream();
+                try {
+                    os.write(payload);
+                } finally {
+                    os.close();
+                }
+            }
+            int status = conn.getResponseCode();
+            InputStream in = (status >= 200 && status < 400) ? conn.getInputStream() : conn.getErrorStream();
+            String respBody = readStream(in);
+            Map<String, String> respHeaders = new LinkedHashMap<String, String>();
+            Map<String, List<String>> hf = conn.getHeaderFields();
+            if (hf != null) {
+                for (Map.Entry<String, List<String>> e : hf.entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty()) {
+                        respHeaders.put(e.getKey(), e.getValue().get(0));
+                    }
+                }
+            }
+            return new HttpResponse(status, respBody, respHeaders);
+        } catch (IOException e) {
+            throw new RuntimeException("HTTP request failed: " + e.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static String readStream(InputStream in) throws IOException {
+        if (in == null) return "";
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int read;
+        try {
+            while ((read = in.read(chunk)) != -1) {
+                buffer.write(chunk, 0, read);
+            }
+        } finally {
+            in.close();
+        }
+        return new String(buffer.toByteArray(), "UTF-8");
     }
 }

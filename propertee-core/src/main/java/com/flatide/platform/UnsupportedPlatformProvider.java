@@ -1,6 +1,7 @@
 package com.flatide.platform;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Default PlatformProvider that rejects all operations.
@@ -38,5 +39,8 @@ public class UnsupportedPlatformProvider implements PlatformProvider {
     }
     @Override public void deleteFile(String path) {
         throw new UnsupportedOperationException("DELETE_FILE()" + MSG);
+    }
+    @Override public HttpResponse httpRequest(String method, String url, Map<String, String> headers, String body, int timeoutMs) {
+        throw new UnsupportedOperationException("HTTP()" + MSG);
     }
 }

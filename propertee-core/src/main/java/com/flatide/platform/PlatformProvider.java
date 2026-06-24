@@ -1,6 +1,7 @@
 package com.flatide.platform;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Host-provided capability interface for OS resource access.
@@ -46,7 +47,28 @@ public interface PlatformProvider {
 
     void deleteFile(String path) ;
 
+    // --- HTTP ---
+
+    /**
+     * Perform an HTTP request. {@code headers} and {@code body} may be null/empty;
+     * {@code timeoutMs <= 0} uses a host default. Returns the response (any HTTP status,
+     * including 4xx/5xx). Throws on a transport-level failure (bad URL, DNS, connect, timeout).
+     */
+    HttpResponse httpRequest(String method, String url, Map<String, String> headers, String body, int timeoutMs);
+
     // --- Data classes ---
+
+    class HttpResponse {
+        public final int status;
+        public final String body;
+        public final Map<String, String> headers;
+
+        public HttpResponse(int status, String body, Map<String, String> headers) {
+            this.status = status;
+            this.body = body;
+            this.headers = headers;
+        }
+    }
 
     class FileInfo {
         public final String type;  // "file" or "dir"
