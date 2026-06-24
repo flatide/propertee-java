@@ -1,4 +1,4 @@
-# ProperTee Language Specification v0.7.0
+# ProperTee Language Specification v0.8.0
 
 ## Overview
 
@@ -1112,7 +1112,7 @@ Common error conditions:
 
 ## Changelog
 
-### Unreleased
+### v0.8.0
 
 - **HTTP built-ins**: `HTTP_GET(url, [options])`, `HTTP_POST(url, body, [options])`, and the general `HTTP(method, url, [options])`. Host-provided (`PlatformProvider.httpRequest`); async (run off the scheduler thread like `SHELL`). Returns a Result whose `value` is `{status, body, headers}`; `ok` is true only for 2xx, and a transport failure yields `{status: 0, body: <message>, headers: {}}`.
 
