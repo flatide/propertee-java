@@ -681,7 +681,13 @@ Only meaningful inside functions running within a `multi` block.
 
 > **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` (and spawning / async) works whenever it appears as a **statement** inside an `if`/`else` body, a `loop` body, a bare function-call statement (`worker()`), a `multi` worker body, or any nesting of these — other `multi` workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime).
 >
-> The one remaining case is a `SLEEP` reached through an **expression**, not a statement: an assignment right-hand side (`x = worker()`), an operator (`a + worker()`), an `if`/`loop` condition, a loop iterable, or a function argument. There the Java implementation falls back to a **blocking** `Thread.sleep` (correct duration, but it blocks the scheduler thread for that sleep). `monitor` bodies also run synchronously by design and use the same blocking fallback. Single-threaded scripts are unaffected. A future release will make these expression-embedded cases fully cooperative too.
+> A few cases still run eagerly. They do **not** change results (timing and values stay correct) — they cost concurrency: while the eager region runs, other `multi` workers and `monitor` ticks pause.
+>
+> - **`SLEEP` reached through an expression** (not a statement): an assignment right-hand side (`x = worker()`), an operator (`a + worker()`), an `if`/`loop` condition, a loop iterable, or a function argument. Calling a function this way runs its **whole body eagerly**, so a `SLEEP` inside falls back to a **blocking** `Thread.sleep`.
+> - **The setup part of a `multi` block** runs eagerly. A `SLEEP` there (including a setup `loop` that spawns) blocks — so a `multi` nested inside a worker, whose setup sleeps, pauses the outer workers.
+> - **`monitor` bodies** run synchronously: a `SLEEP` there blocks, and an async function call there is a **runtime error**.
+>
+> Separately, async functions (`SHELL`, `HTTP`, host async externals) stay cooperative even in expressions — but they resume by re-running the statement, so side effects placed *before* an async call in the same statement run twice (keep such side effects on their own line). Single-threaded scripts are unaffected by the blocking cases above. A future release may make these fully cooperative.
 
 ## Built-in Functions
 
