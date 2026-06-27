@@ -194,4 +194,88 @@ public class CooperativeNestingTest {
         Assert.assertEquals("worker a result", "20", String.valueOf(out.get(0)));
         Assert.assertEquals("worker b result", "30", String.valueOf(out.get(1)));
     }
+
+    // --- Scope hygiene on exceptional exit from a scoped (function) body ---
+    //
+    // A scoped StatementListStepper pushes the callee's local scope; finish() pops it on the normal
+    // / return path. When break/continue (or a runtime error) unwinds OUT of the function instead,
+    // the scope must still be popped — mirroring the try/finally in the eager callUserFunction.
+    // Otherwise an outer loop that catches the control-flow exception keeps running with the callee's
+    // locals leaked onto the scope stack, so a later reference resolves to a name that should be gone.
+
+    /** Returns the runtime error message from running {@code script}, or null if it completed. */
+    private String runExpectingError(String script) {
+        List<String> errors = new ArrayList<String>();
+        ProperTeeParser.RootContext tree = ScriptParser.parse(script, errors);
+        Assert.assertNotNull("parse failed: " + errors, tree);
+        BuiltinFunctions.PrintFunction noop = new BuiltinFunctions.PrintFunction() {
+            @Override
+            public void print(Object[] args) { /* discard */ }
+        };
+        ProperTeeInterpreter visitor = new ProperTeeInterpreter(
+            new LinkedHashMap<String, Object>(), noop, noop, 1000, "error", null);
+        Scheduler scheduler = new Scheduler(visitor);
+        try {
+            scheduler.run(visitor.createRootStepper(tree));
+            return null;
+        } catch (RuntimeException e) {
+            return e.getMessage();
+        } finally {
+            visitor.builtins.shutdown();
+        }
+    }
+
+    @Test
+    public void breakOutOfCalledFunctionDoesNotLeakScope() {
+        // `break` escapes f() to the call-site loop; f()'s local `x` must not survive into PRINT(x).
+        String script =
+            "function f() do\n" +
+            "    x = \"local\"\n" +
+            "    break\n" +
+            "end\n" +
+            "loop i in [1] do\n" +
+            "    f()\n" +
+            "end\n" +
+            "PRINT(x)\n";
+        String err = runExpectingError(script);
+        Assert.assertNotNull("expected an undefined-variable error, but the script completed", err);
+        Assert.assertTrue("expected 'x' undefined error, got: " + err, err.contains("'x' is not defined"));
+    }
+
+    @Test
+    public void continueOutOfCalledFunctionDoesNotLeakScope() {
+        String script =
+            "function f() do\n" +
+            "    x = \"local\"\n" +
+            "    continue\n" +
+            "end\n" +
+            "loop i in [1] do\n" +
+            "    f()\n" +
+            "end\n" +
+            "PRINT(x)\n";
+        String err = runExpectingError(script);
+        Assert.assertNotNull("expected an undefined-variable error, but the script completed", err);
+        Assert.assertTrue("expected 'x' undefined error, got: " + err, err.contains("'x' is not defined"));
+    }
+
+    @Test
+    public void breakUnwindingThroughTwoFramesDoesNotLeakScope() {
+        // `break` unwinds inner() -> mid() -> loop; both frames' locals must be popped.
+        String script =
+            "function inner() do\n" +
+            "    y = \"deep\"\n" +
+            "    break\n" +
+            "end\n" +
+            "function mid() do\n" +
+            "    z = \"mid\"\n" +
+            "    inner()\n" +
+            "end\n" +
+            "loop i in [1] do\n" +
+            "    mid()\n" +
+            "end\n" +
+            "PRINT(y)\n";
+        String err = runExpectingError(script);
+        Assert.assertNotNull("expected an undefined-variable error, but the script completed", err);
+        Assert.assertTrue("expected 'y' undefined error, got: " + err, err.contains("'y' is not defined"));
+    }
 }

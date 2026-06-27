@@ -286,6 +286,25 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 scopePushed = true;
             }
 
+            try {
+                return stepAfterPush();
+            } catch (AsyncPendingException e) {
+                throw e; // resumed later — keep the local scope pushed
+            } catch (RuntimeException e) {
+                // Exceptional exit (Break/Continue, an uncaught return, or a runtime error): finish()
+                // will not run, so pop the local scope here, mirroring the try/finally in the eager
+                // callUserFunction. Without this, a control-flow exception unwinding out of a scoped
+                // body (e.g. `break` inside a called function) leaks the callee's locals onto the
+                // thread's scope stack, which an outer loop that catches the exception would then see.
+                if (scopePushed) {
+                    interp.getScopeStack().pop();
+                    scopePushed = false;
+                }
+                throw e;
+            }
+        }
+
+        private StepResult stepAfterPush() {
             // Resume an active control-flow sub-stepper before anything else.
             if (child != null) {
                 return driveChild();
