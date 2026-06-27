@@ -220,21 +220,34 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
      * AsyncPendingException returned by {@code eval()} of a statement, and feeds SPAWN_THREADS
      * results back via {@link #setSendValue}.
      *
-     * <p>This is the single engine behind the top-level script ({@link RootStepper}) and each
-     * multi-block worker (function body). Two policies parameterize it:
+     * <p>This is the single engine behind the top-level script ({@link RootStepper}), each
+     * multi-block worker (function body), and — when driving a {@code child} sub-stepper — the
+     * bodies of control-flow constructs (e.g. {@link IfStepper}). Three policies parameterize it:
      * <ul>
      *   <li>{@code localScope} — when non-null, pushed before the first statement and popped on
-     *       completion (function/worker bodies). When null, no scope is pushed (top level).</li>
+     *       completion (function/worker bodies). When null, no scope is pushed (top level, and
+     *       if/loop bodies which share the enclosing scope).</li>
      *   <li>{@code emptyObjectOnFallthrough} — when a body completes without an explicit
-     *       {@code return}: workers/functions yield an empty object ({@code {}}); the top level
-     *       yields the last statement's value.</li>
+     *       {@code return}: workers/functions yield an empty object ({@code {}}); the top level and
+     *       control-flow bodies yield the last statement's value.</li>
+     *   <li>{@code catchReturn} — when true, a {@code return} ends this stepper with the returned
+     *       value (top level / function / worker). When false (if/loop bodies), {@code return}
+     *       propagates up so it unwinds to the enclosing function, matching the eager model.</li>
      * </ul>
+     *
+     * <p>Cooperative nesting: a statement that is itself a suspendable control-flow construct is run
+     * as a {@code child} sub-stepper rather than evaluated eagerly. BOUNDARY/COMMAND results from the
+     * child are relayed upward (the child stays active across suspension); Break/Continue/Return
+     * unwind through {@code child.step()} as exceptions, exactly as they did through the eager
+     * {@code evalBlock} call stack. Statements with no sub-stepper (assignment, plain expression,
+     * multi, flow control) keep the original eager {@code eval()} path.
      */
     public static class StatementListStepper implements Stepper {
         private final ProperTeeInterpreter interp;
         private final List<ProperTeeParser.StatementContext> statements;
         private final Map<String, Object> localScope;
         private final boolean emptyObjectOnFallthrough;
+        private final boolean catchReturn;
         private int index = 0;
         private Object result = null;
         private boolean hasExplicitReturn = false;
@@ -243,15 +256,25 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         private boolean scopePushed = false;
         private Object sendValue;
         private boolean waitingForSpawn = false;
+        private Stepper child; // active control-flow sub-stepper (null when none)
 
         public StatementListStepper(ProperTeeInterpreter interp,
                                     List<ProperTeeParser.StatementContext> statements,
                                     Map<String, Object> localScope,
                                     boolean emptyObjectOnFallthrough) {
+            this(interp, statements, localScope, emptyObjectOnFallthrough, true);
+        }
+
+        public StatementListStepper(ProperTeeInterpreter interp,
+                                    List<ProperTeeParser.StatementContext> statements,
+                                    Map<String, Object> localScope,
+                                    boolean emptyObjectOnFallthrough,
+                                    boolean catchReturn) {
             this.interp = interp;
             this.statements = statements;
             this.localScope = localScope;
             this.emptyObjectOnFallthrough = emptyObjectOnFallthrough;
+            this.catchReturn = catchReturn;
         }
 
         @Override
@@ -261,6 +284,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             if (localScope != null && !scopePushed) {
                 interp.getScopeStack().push(localScope);
                 scopePushed = true;
+            }
+
+            // Resume an active control-flow sub-stepper before anything else.
+            if (child != null) {
+                return driveChild();
             }
 
             // Process SPAWN_THREADS results
@@ -283,6 +311,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
 
             if (index < statements.size()) {
+                // Suspendable control-flow constructs run as a child sub-stepper so a nested
+                // SLEEP/spawn/async yields cooperatively instead of blocking the scheduler.
+                Stepper sub = interp.createStatementStepper(statements.get(index));
+                if (sub != null) {
+                    child = sub;
+                    return driveChild();
+                }
+
                 try {
                     result = interp.eval(statements.get(index));
                     if (result instanceof SchedulerCommand) {
@@ -303,6 +339,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         return finishFallthrough();
                     }
                 } catch (ReturnException e) {
+                    if (!catchReturn) throw e;
                     hasExplicitReturn = true;
                     return finish(e.getValue());
                 } catch (AsyncPendingException e) {
@@ -313,9 +350,42 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             return finishFallthrough();
         }
 
+        /** Advance the active {@code child} sub-stepper and relay/translate its result. */
+        private StepResult driveChild() {
+            StepResult r;
+            try {
+                r = child.step();
+            } catch (AsyncPendingException e) {
+                // The child's current statement is async-pending; keep the child for replay.
+                return StepResult.command(SchedulerCommand.awaitAsync());
+            } catch (ReturnException e) {
+                child = null;
+                if (!catchReturn) throw e; // unwind to the enclosing function/worker
+                hasExplicitReturn = true;
+                return finish(e.getValue());
+            }
+            // BreakException/ContinueException/ProperTeeError propagate uncaught, unwinding through
+            // this step() just as they unwound through the eager evalBlock call stack.
+
+            if (r.isBoundary() || r.isCommand()) {
+                return r; // child stays active across the yield/suspension
+            }
+
+            // Child completed: adopt its value as this statement's result, then advance.
+            result = child.getResult();
+            child = null;
+            if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
+            index++;
+            if (index < statements.size()) {
+                yieldBoundary = true;
+                return StepResult.BOUNDARY;
+            }
+            return finishFallthrough();
+        }
+
         private StepResult finishFallthrough() {
-            // No explicit return reached. Top level keeps the last statement value (result);
-            // function/worker bodies yield an empty object.
+            // No explicit return reached. Top level / control-flow bodies keep the last statement
+            // value (result); function/worker bodies yield an empty object.
             return finish(emptyObjectOnFallthrough ? new LinkedHashMap<String, Object>() : result);
         }
 
@@ -335,14 +405,100 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         public Object getResult() { return result; }
         public boolean hasExplicitReturn() { return hasExplicitReturn; }
         @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
+        public void setSendValue(Object value) {
+            // Route spawn-result / async-resume payloads to the deepest active sub-stepper, which is
+            // the one that actually issued the command.
+            if (child != null) {
+                child.setSendValue(value);
+            } else {
+                this.sendValue = value;
+            }
+        }
     }
 
     /** Top-level script driver: no local scope, last-statement value on fallthrough. */
     public static class RootStepper extends StatementListStepper {
         public RootStepper(ProperTeeInterpreter interp, ProperTeeParser.RootContext ctx) {
-            super(interp, ctx.statement(), null, false);
+            super(interp, ctx.statement(), null, false, true);
         }
+    }
+
+    /**
+     * Cooperative {@code if}/{@code else}: evaluates the condition once (eagerly — a suspendable call
+     * embedded in the condition expression is the documented eager seam), then drives the chosen
+     * branch as a child block stepper so a SLEEP/spawn/async in the branch body yields cooperatively.
+     * Mirrors {@link #visitIfStatement}: no new scope, branch value (or empty when no branch taken).
+     */
+    public static class IfStepper implements Stepper {
+        private final ProperTeeInterpreter interp;
+        private final ProperTeeParser.IfStatementContext ctx;
+        private Stepper body; // chosen branch (null until evaluated, or if no branch taken)
+        private boolean evaluated = false;
+        private Object result = null;
+        private boolean done = false;
+
+        public IfStepper(ProperTeeInterpreter interp, ProperTeeParser.IfStatementContext ctx) {
+            this.interp = interp;
+            this.ctx = ctx;
+        }
+
+        @Override
+        public StepResult step() {
+            if (done) return StepResult.done(result);
+
+            if (!evaluated) {
+                interp.checkKeywordAllowed("if", ctx);
+                Object condition;
+                try {
+                    condition = interp.eval(ctx.condition);
+                } catch (AsyncPendingException e) {
+                    // Async in the condition: retry on resume (evaluated stays false).
+                    return StepResult.command(SchedulerCommand.awaitAsync());
+                }
+                evaluated = true;
+                ProperTeeParser.BlockContext branch = null;
+                if (TypeChecker.isTruthy(condition)) {
+                    branch = ctx.thenBody;
+                } else if (ctx.elseBody != null) {
+                    branch = ctx.elseBody;
+                }
+                if (branch == null) {
+                    done = true;
+                    return StepResult.done(result); // null, matching visitIfStatement
+                }
+                // catchReturn=false: a return inside the branch unwinds to the enclosing function.
+                body = new StatementListStepper(interp, branch.statement(), null, false, false);
+            }
+
+            StepResult r = body.step();
+            if (r.isDone()) {
+                result = body.getResult();
+                done = true;
+                return StepResult.done(result);
+            }
+            return r; // BOUNDARY / COMMAND pass through; body stays active
+        }
+
+        @Override
+        public boolean isDone() { return done; }
+        @Override
+        public Object getResult() { return result; }
+        @Override
+        public void setSendValue(Object value) {
+            if (body != null) body.setSendValue(value);
+        }
+    }
+
+    /**
+     * Dispatch a statement to a suspendable sub-stepper, or return {@code null} to keep the eager
+     * {@code eval()} path. Only constructs that can cooperatively suspend in statement position are
+     * handled here; everything else stays eager.
+     */
+    Stepper createStatementStepper(ProperTeeParser.StatementContext stmt) {
+        if (stmt instanceof ProperTeeParser.IfStmtContext) {
+            return new IfStepper(this, ((ProperTeeParser.IfStmtContext) stmt).ifStatement());
+        }
+        return null;
     }
 
     // ============================================================
