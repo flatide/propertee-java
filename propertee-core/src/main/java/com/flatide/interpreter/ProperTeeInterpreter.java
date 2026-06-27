@@ -725,6 +725,88 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     }
 
     /**
+     * Cooperative call of a user function appearing as a bare statement ({@code foo()}). Evaluates
+     * the argument expressions eagerly (a suspendable call embedded in an argument is the documented
+     * eager seam, but async there is honored via awaitAsync retry), then runs the function body as a
+     * child stepper so a SLEEP/spawn/async in the body yields cooperatively. Mirrors
+     * {@link #callUserFunction}: arg-count validation, missing args default to {@code {}}, body runs
+     * in a fresh local scope, and the result is the returned value (or {@code {}} on fallthrough).
+     *
+     * <p>Only bare user-function calls route here. Builtins (which may return a SchedulerCommand
+     * handled by the eager path), ignored functions, and calls embedded in larger expressions keep
+     * the eager {@code eval()} path.
+     */
+    public static class UserCallStepper implements Stepper {
+        private final ProperTeeInterpreter interp;
+        private final ProperTeeParser.FunctionCallContext call;
+        private Stepper body;
+        private boolean prepared = false;
+        private Object result = null;
+        private boolean done = false;
+
+        public UserCallStepper(ProperTeeInterpreter interp, ProperTeeParser.FunctionCallContext call) {
+            this.interp = interp;
+            this.call = call;
+        }
+
+        @Override
+        public StepResult step() {
+            if (done) return StepResult.done(result);
+
+            if (!prepared) {
+                String funcName = call.funcName.getText();
+                FunctionDef funcDef = interp.userDefinedFunctions.get(funcName);
+                List<String> params = funcDef.getParams();
+
+                List<Object> args = new ArrayList<Object>();
+                try {
+                    if (call.expression() != null) {
+                        for (ProperTeeParser.ExpressionContext exprCtx : call.expression()) {
+                            args.add(interp.eval(exprCtx));
+                        }
+                    }
+                } catch (AsyncPendingException e) {
+                    // An argument is async-pending; retry on resume (args re-evaluated).
+                    return StepResult.command(SchedulerCommand.awaitAsync());
+                }
+
+                if (args.size() > params.size()) {
+                    throw interp.createError(
+                        "Function '" + funcName + "' expects " + params.size() + " argument(s), but " + args.size() + " were provided",
+                        call);
+                }
+
+                Map<String, Object> localScope = new LinkedHashMap<String, Object>();
+                for (int i = 0; i < params.size(); i++) {
+                    localScope.put(params.get(i),
+                        i < args.size() ? TypeChecker.deepCopy(args.get(i)) : new LinkedHashMap<String, Object>());
+                }
+
+                prepared = true;
+                // catchReturn=true + empty-object fallthrough: matches callUserFunction.
+                body = new StatementListStepper(interp, funcDef.getBody().statement(), localScope, true, true);
+            }
+
+            StepResult r = body.step();
+            if (r.isDone()) {
+                result = body.getResult();
+                done = true;
+                return StepResult.done(result);
+            }
+            return r;
+        }
+
+        @Override
+        public boolean isDone() { return done; }
+        @Override
+        public Object getResult() { return result; }
+        @Override
+        public void setSendValue(Object value) {
+            if (body != null) body.setSendValue(value);
+        }
+    }
+
+    /**
      * Dispatch a statement to a suspendable sub-stepper, or return {@code null} to keep the eager
      * {@code eval()} path. Only constructs that can cooperatively suspend in statement position are
      * handled here; everything else stays eager.
@@ -745,7 +827,31 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 return new KeyValueLoopStepper(this, (ProperTeeParser.KeyValueLoopContext) loop);
             }
         }
+        if (stmt instanceof ProperTeeParser.ExprStmtContext) {
+            ProperTeeParser.FunctionCallContext call = bareUserCall(((ProperTeeParser.ExprStmtContext) stmt).expression());
+            if (call != null) {
+                return new UserCallStepper(this, call);
+            }
+        }
         return null;
+    }
+
+    /**
+     * If {@code expr} is exactly a bare call to a user-defined function (no surrounding operators,
+     * member access, etc.), return its {@link ProperTeeParser.FunctionCallContext}; otherwise null.
+     * Builtins and ignored functions are excluded so they keep the eager path (builtins take
+     * precedence over user functions there, and ignored functions must throw their access error).
+     */
+    private ProperTeeParser.FunctionCallContext bareUserCall(ProperTeeParser.ExpressionContext expr) {
+        if (!(expr instanceof ProperTeeParser.AtomExprContext)) return null;
+        ProperTeeParser.AtomContext atom = ((ProperTeeParser.AtomExprContext) expr).atom();
+        if (!(atom instanceof ProperTeeParser.FuncAtomContext)) return null;
+        ProperTeeParser.FunctionCallContext call = ((ProperTeeParser.FuncAtomContext) atom).functionCall();
+        String funcName = call.funcName.getText();
+        if (ignoredFunctions.contains(funcName)) return null;
+        if (builtins.has(funcName)) return null;
+        if (!userDefinedFunctions.containsKey(funcName)) return null;
+        return call;
     }
 
     // ============================================================

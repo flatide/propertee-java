@@ -137,6 +137,30 @@ public class CooperativeNestingTest {
             ms < OVERLAP_CEILING);
     }
 
+    /**
+     * Two workers each call a helper as a bare statement; the helper sleeps. The bare call must run
+     * cooperatively so the two helpers' sleeps overlap, rather than serializing under the old eager
+     * callUserFunction blocking fallback.
+     */
+    @Test
+    public void bareCallBodySleepYieldsCooperatively() {
+        String script =
+            "function inner() do SLEEP(" + SLEEP_MS + ") end\n" +
+            "function w() do\n" +
+            "  inner()\n" +
+            "  return 1\n" +
+            "end\n" +
+            "multi r do\n" +
+            "  thread a: w()\n" +
+            "  thread b: w()\n" +
+            "end\n";
+        long ms = runAndTimeMs(script);
+        Assert.assertTrue("bare-call SLEEP should actually wait, was " + ms + "ms", ms >= ACTUALLY_SLEPT_FLOOR);
+        Assert.assertTrue(
+            "two bare-call helper SLEEPs should overlap cooperatively (~1x), not serialize (~2x); was " + ms + "ms",
+            ms < OVERLAP_CEILING);
+    }
+
     /** Sanity: results still flow back correctly when SLEEP suspends inside an if body. */
     @Test
     public void resultsIntactAcrossCooperativeIfSleep() {
