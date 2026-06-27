@@ -190,11 +190,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return new RootStepper(this, ctx);
     }
 
-    public Stepper createBlockStepper(ProperTeeParser.BlockContext ctx) {
-        return new BlockStepper(this, ctx);
-    }
-
-    // --- Root and Block Steppers (inner classes) ---
+    // --- Statement-list Stepper (inner classes) ---
 
     /**
      * Process collected results from SPAWN_THREADS command (sent back by scheduler).
@@ -218,26 +214,54 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
     }
 
-    /** Root stepper: runs all statements with boundaries, catches ReturnException */
-    public static class RootStepper implements Stepper {
+    /**
+     * Drives a flat list of statements, yielding a BOUNDARY between each so the scheduler can
+     * round-robin at statement granularity. Honors SchedulerCommands (SLEEP/SPAWN_THREADS) and
+     * AsyncPendingException returned by {@code eval()} of a statement, and feeds SPAWN_THREADS
+     * results back via {@link #setSendValue}.
+     *
+     * <p>This is the single engine behind the top-level script ({@link RootStepper}) and each
+     * multi-block worker (function body). Two policies parameterize it:
+     * <ul>
+     *   <li>{@code localScope} — when non-null, pushed before the first statement and popped on
+     *       completion (function/worker bodies). When null, no scope is pushed (top level).</li>
+     *   <li>{@code emptyObjectOnFallthrough} — when a body completes without an explicit
+     *       {@code return}: workers/functions yield an empty object ({@code {}}); the top level
+     *       yields the last statement's value.</li>
+     * </ul>
+     */
+    public static class StatementListStepper implements Stepper {
         private final ProperTeeInterpreter interp;
         private final List<ProperTeeParser.StatementContext> statements;
+        private final Map<String, Object> localScope;
+        private final boolean emptyObjectOnFallthrough;
         private int index = 0;
         private Object result = null;
         private boolean hasExplicitReturn = false;
         private boolean done = false;
         private boolean yieldBoundary = false;
+        private boolean scopePushed = false;
         private Object sendValue;
         private boolean waitingForSpawn = false;
 
-        public RootStepper(ProperTeeInterpreter interp, ProperTeeParser.RootContext ctx) {
+        public StatementListStepper(ProperTeeInterpreter interp,
+                                    List<ProperTeeParser.StatementContext> statements,
+                                    Map<String, Object> localScope,
+                                    boolean emptyObjectOnFallthrough) {
             this.interp = interp;
-            this.statements = ctx.statement();
+            this.statements = statements;
+            this.localScope = localScope;
+            this.emptyObjectOnFallthrough = emptyObjectOnFallthrough;
         }
 
         @Override
         public StepResult step() {
             if (done) return StepResult.done(result);
+
+            if (localScope != null && !scopePushed) {
+                interp.getScopeStack().push(localScope);
+                scopePushed = true;
+            }
 
             // Process SPAWN_THREADS results
             if (waitingForSpawn && sendValue != null) {
@@ -249,9 +273,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     yieldBoundary = true;
                     return StepResult.BOUNDARY;
                 } else {
-                    done = true;
-                    result = null;
-                    return StepResult.done(result);
+                    return finishFallthrough();
                 }
             }
 
@@ -278,19 +300,31 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         yieldBoundary = true;
                         return StepResult.BOUNDARY;
                     } else {
-                        done = true;
-                        return StepResult.done(result);
+                        return finishFallthrough();
                     }
                 } catch (ReturnException e) {
                     hasExplicitReturn = true;
-                    result = e.getValue();
-                    done = true;
-                    return StepResult.done(result);
+                    return finish(e.getValue());
                 } catch (AsyncPendingException e) {
                     return StepResult.command(SchedulerCommand.awaitAsync());
                 }
             }
 
+            return finishFallthrough();
+        }
+
+        private StepResult finishFallthrough() {
+            // No explicit return reached. Top level keeps the last statement value (result);
+            // function/worker bodies yield an empty object.
+            return finish(emptyObjectOnFallthrough ? new LinkedHashMap<String, Object>() : result);
+        }
+
+        private StepResult finish(Object val) {
+            if (scopePushed) {
+                interp.getScopeStack().pop();
+                scopePushed = false;
+            }
+            result = val;
             done = true;
             return StepResult.done(result);
         }
@@ -304,267 +338,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         public void setSendValue(Object value) { this.sendValue = value; }
     }
 
-    /** Block stepper: runs all statements with boundaries */
-    public static class BlockStepper implements Stepper {
-        private final ProperTeeInterpreter interp;
-        private final List<ProperTeeParser.StatementContext> statements;
-        private int index = 0;
-        private Object result = null;
-        private boolean done = false;
-        private boolean yieldBoundary = false;
-        private Object sendValue;
-        private boolean waitingForSpawn = false;
-
-        public BlockStepper(ProperTeeInterpreter interp, ProperTeeParser.BlockContext ctx) {
-            this.interp = interp;
-            this.statements = ctx.statement();
+    /** Top-level script driver: no local scope, last-statement value on fallthrough. */
+    public static class RootStepper extends StatementListStepper {
+        public RootStepper(ProperTeeInterpreter interp, ProperTeeParser.RootContext ctx) {
+            super(interp, ctx.statement(), null, false);
         }
-
-        @Override
-        public StepResult step() {
-            if (done) return StepResult.done(result);
-
-            if (waitingForSpawn && sendValue != null) {
-                processSpawnResults(interp, sendValue);
-                sendValue = null;
-                waitingForSpawn = false;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
-                    done = true;
-                    result = null;
-                    return StepResult.done(result);
-                }
-            }
-
-            if (yieldBoundary) {
-                yieldBoundary = false;
-                return StepResult.BOUNDARY;
-            }
-
-            if (index < statements.size()) {
-                try {
-                    result = interp.eval(statements.get(index));
-                    if (result instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) result;
-                        result = null;
-                        index++;
-                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                            waitingForSpawn = true;
-                        }
-                        return StepResult.command(cmd);
-                    }
-                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
-                    index++;
-                    if (index < statements.size()) {
-                        yieldBoundary = true;
-                        return StepResult.BOUNDARY;
-                    } else {
-                        done = true;
-                        return StepResult.done(result);
-                    }
-                } catch (AsyncPendingException e) {
-                    return StepResult.command(SchedulerCommand.awaitAsync());
-                }
-            }
-
-            done = true;
-            return StepResult.done(result);
-        }
-
-        @Override
-        public boolean isDone() { return done; }
-        @Override
-        public Object getResult() { return result; }
-        @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
-    }
-
-    /** FunctionCall stepper: pushes scope, runs body with boundaries, pops scope */
-    public static class FunctionCallStepper implements Stepper {
-        private final ProperTeeInterpreter interp;
-        private final FunctionDef funcDef;
-        private final Map<String, Object> localScope;
-        private final List<ProperTeeParser.StatementContext> statements;
-        private int index = 0;
-        private Object result = null;
-        private boolean done = false;
-        private boolean yieldBoundary = false;
-        private boolean scopePushed = false;
-        private Object sendValue;
-        private boolean waitingForSpawn = false;
-
-        public FunctionCallStepper(ProperTeeInterpreter interp, FunctionDef funcDef,
-                                    Map<String, Object> localScope) {
-            this.interp = interp;
-            this.funcDef = funcDef;
-            this.localScope = localScope;
-            this.statements = funcDef.getBody().statement();
-        }
-
-        @Override
-        public StepResult step() {
-            if (done) return StepResult.done(result);
-
-            if (!scopePushed) {
-                interp.getScopeStack().push(localScope);
-                scopePushed = true;
-            }
-
-            if (waitingForSpawn && sendValue != null) {
-                processSpawnResults(interp, sendValue);
-                sendValue = null;
-                waitingForSpawn = false;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
-                    return finish(new LinkedHashMap<String, Object>());
-                }
-            }
-
-            if (yieldBoundary) {
-                yieldBoundary = false;
-                return StepResult.BOUNDARY;
-            }
-
-            if (index < statements.size()) {
-                try {
-                    Object evalResult = interp.eval(statements.get(index));
-                    if (evalResult instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) evalResult;
-                        result = null;
-                        index++;
-                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                            waitingForSpawn = true;
-                        }
-                        return StepResult.command(cmd);
-                    }
-                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
-                    index++;
-                    if (index < statements.size()) {
-                        yieldBoundary = true;
-                        return StepResult.BOUNDARY;
-                    } else {
-                        return finish(new LinkedHashMap<String, Object>());
-                    }
-                } catch (ReturnException e) {
-                    return finish(e.getValue());
-                } catch (AsyncPendingException e) {
-                    return StepResult.command(SchedulerCommand.awaitAsync());
-                }
-            }
-
-            return finish(new LinkedHashMap<String, Object>());
-        }
-
-        private StepResult finish(Object val) {
-            interp.getScopeStack().pop();
-            result = val;
-            done = true;
-            return StepResult.done(result);
-        }
-
-        @Override
-        public boolean isDone() { return done; }
-        @Override
-        public Object getResult() { return result; }
-        @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
-    }
-
-    /** Thread generator stepper: used for MULTI block child threads */
-    public static class ThreadGeneratorStepper implements Stepper {
-        private final ProperTeeInterpreter interp;
-        private final FunctionDef funcDef;
-        private final Map<String, Object> localScope;
-        private final List<ProperTeeParser.StatementContext> statements;
-        private int index = 0;
-        private Object result = null;
-        private boolean done = false;
-        private boolean yieldBoundary = false;
-        private boolean scopePushed = false;
-        private Object sendValue;
-        private boolean waitingForSpawn = false;
-
-        public ThreadGeneratorStepper(ProperTeeInterpreter interp, FunctionDef funcDef,
-                                       Map<String, Object> localScope) {
-            this.interp = interp;
-            this.funcDef = funcDef;
-            this.localScope = localScope;
-            this.statements = funcDef.getBody().statement();
-        }
-
-        @Override
-        public StepResult step() {
-            if (done) return StepResult.done(result);
-
-            if (!scopePushed) {
-                interp.getScopeStack().push(localScope);
-                scopePushed = true;
-            }
-
-            if (waitingForSpawn && sendValue != null) {
-                processSpawnResults(interp, sendValue);
-                sendValue = null;
-                waitingForSpawn = false;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
-                    return finish(new LinkedHashMap<String, Object>());
-                }
-            }
-
-            if (yieldBoundary) {
-                yieldBoundary = false;
-                return StepResult.BOUNDARY;
-            }
-
-            if (index < statements.size()) {
-                try {
-                    Object evalResult = interp.eval(statements.get(index));
-                    if (evalResult instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) evalResult;
-                        result = null;
-                        index++;
-                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                            waitingForSpawn = true;
-                        }
-                        return StepResult.command(cmd);
-                    }
-                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
-                    index++;
-                    if (index < statements.size()) {
-                        yieldBoundary = true;
-                        return StepResult.BOUNDARY;
-                    } else {
-                        return finish(new LinkedHashMap<String, Object>());
-                    }
-                } catch (ReturnException e) {
-                    return finish(e.getValue());
-                } catch (AsyncPendingException e) {
-                    return StepResult.command(SchedulerCommand.awaitAsync());
-                }
-            }
-
-            return finish(new LinkedHashMap<String, Object>());
-        }
-
-        private StepResult finish(Object val) {
-            interp.getScopeStack().pop();
-            result = val;
-            done = true;
-            return StepResult.done(result);
-        }
-
-        @Override
-        public boolean isDone() { return done; }
-        @Override
-        public Object getResult() { return result; }
-        @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
     }
 
     // ============================================================
@@ -1760,7 +1538,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         localScope.put(params.get(j), j < spawn.args.size() ? TypeChecker.deepCopy(spawn.args.get(j)) : new LinkedHashMap<String, Object>());
                     }
 
-                    Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);
+                    Stepper threadStepper = new StatementListStepper(
+                        this, funcDef.getBody().statement(), localScope, true);
                     specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
 
                 } else if (builtins.has(spawn.funcName)) {
