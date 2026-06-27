@@ -94,6 +94,49 @@ public class CooperativeNestingTest {
             ms < OVERLAP_CEILING);
     }
 
+    /** Two workers each SLEEP inside a value-loop body — iterations must overlap, not serialize. */
+    @Test
+    public void valueLoopBodySleepYieldsCooperatively() {
+        // 2 iterations x 150ms = 300ms of sleep per worker; overlapped ~300ms, serialized ~600ms.
+        String script =
+            "function w() do\n" +
+            "  loop i in [1, 2] do SLEEP(150) end\n" +
+            "  return 1\n" +
+            "end\n" +
+            "multi r do\n" +
+            "  thread a: w()\n" +
+            "  thread b: w()\n" +
+            "end\n";
+        long ms = runAndTimeMs(script);
+        Assert.assertTrue("value-loop SLEEP should actually wait, was " + ms + "ms", ms >= ACTUALLY_SLEPT_FLOOR);
+        Assert.assertTrue(
+            "two value-loop-body SLEEPs should overlap cooperatively (~1x), not serialize (~2x); was " + ms + "ms",
+            ms < OVERLAP_CEILING);
+    }
+
+    /** Same probe but with a condition loop (re-evaluates its condition each iteration). */
+    @Test
+    public void conditionLoopBodySleepYieldsCooperatively() {
+        String script =
+            "function w() do\n" +
+            "  i = 0\n" +
+            "  loop i < 2 infinite do\n" +
+            "    SLEEP(150)\n" +
+            "    i = i + 1\n" +
+            "  end\n" +
+            "  return 1\n" +
+            "end\n" +
+            "multi r do\n" +
+            "  thread a: w()\n" +
+            "  thread b: w()\n" +
+            "end\n";
+        long ms = runAndTimeMs(script);
+        Assert.assertTrue("condition-loop SLEEP should actually wait, was " + ms + "ms", ms >= ACTUALLY_SLEPT_FLOOR);
+        Assert.assertTrue(
+            "two condition-loop-body SLEEPs should overlap cooperatively; was " + ms + "ms",
+            ms < OVERLAP_CEILING);
+    }
+
     /** Sanity: results still flow back correctly when SLEEP suspends inside an if body. */
     @Test
     public void resultsIntactAcrossCooperativeIfSleep() {

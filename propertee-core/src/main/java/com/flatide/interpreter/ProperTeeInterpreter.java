@@ -490,6 +490,241 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     }
 
     /**
+     * Cooperative loop base. Drives each iteration's body as a child block stepper (so a nested
+     * SLEEP/spawn/async yields to the scheduler) and yields a BOUNDARY between iterations for
+     * round-robin fairness. Faithfully mirrors the eager loop visitors: keyword-hide check,
+     * iteration-limit enforcement (including the "warn" behavior), Break/Continue handling,
+     * last-body-value result, and no new scope for the body (it shares the enclosing scope). A
+     * {@code return} inside the body unwinds past the loop to the enclosing function (the body
+     * stepper uses {@code catchReturn=false}). A suspendable call embedded in the condition/iterable
+     * expression is the documented eager seam, but async there is still honored: the iteration source
+     * is re-evaluated on resume (awaitAsync retry).
+     *
+     * <p>Subclasses supply the iteration source via {@link #advance()} (stage the next element,
+     * binding nothing) and {@link #bindCurrent()} (bind loop variables). Binding happens after the
+     * limit check, exactly as in the eager loops.
+     */
+    public abstract static class LoopStepper implements Stepper {
+        protected final ProperTeeInterpreter interp;
+        private final ProperTeeParser.BlockContext block;
+        private final boolean isInfinite;
+        private int iterations = 0;
+        private Object result = null;
+        private boolean started = false;
+        private boolean done = false;
+        private Stepper body;
+
+        protected LoopStepper(ProperTeeInterpreter interp, ProperTeeParser.BlockContext block, boolean isInfinite) {
+            this.interp = interp;
+            this.block = block;
+            this.isInfinite = isInfinite;
+        }
+
+        /** Context for keyword-hide checks and iteration-limit errors. */
+        protected abstract org.antlr.v4.runtime.ParserRuleContext ctx();
+        /** Hint shown in the iteration-limit error (e.g. {@code "loop ... infinite do"}). */
+        protected abstract String infiniteHint();
+        /** Stage the next element (no binding); return false when the source is exhausted. */
+        protected abstract boolean advance();
+        /** Bind the staged loop variable(s); called only after the limit check passes. */
+        protected abstract void bindCurrent();
+
+        @Override
+        public StepResult step() {
+            if (done) return StepResult.done(result);
+            if (!started) {
+                interp.checkKeywordAllowed("loop", ctx());
+                started = true;
+            }
+
+            if (body == null) {
+                boolean hasNext;
+                try {
+                    hasNext = advance();
+                } catch (AsyncPendingException e) {
+                    return StepResult.command(SchedulerCommand.awaitAsync());
+                }
+                if (!hasNext) {
+                    done = true;
+                    return StepResult.done(result);
+                }
+                int limit = isInfinite ? Integer.MAX_VALUE : interp.maxIterations;
+                if (++iterations > limit) {
+                    if ("warn".equals(interp.iterationLimitBehavior)) {
+                        interp.stderr.print(new Object[]{"Warning: Loop exceeded maximum iterations (" + limit + "), stopping loop"});
+                        done = true;
+                        return StepResult.done(result);
+                    }
+                    throw interp.createError(
+                        "Loop exceeded maximum iterations (" + limit + "). Use '" + infiniteHint() + "' if you need unlimited iterations.",
+                        ctx());
+                }
+                bindCurrent();
+                body = new StatementListStepper(interp, block.statement(), null, false, false);
+            }
+
+            StepResult r;
+            try {
+                r = body.step();
+            } catch (BreakException e) {
+                body = null;
+                done = true;
+                return StepResult.done(result);
+            } catch (ContinueException e) {
+                body = null;
+                return StepResult.BOUNDARY; // between-iteration yield; next step starts the next iteration
+            }
+            if (r.isBoundary() || r.isCommand()) return r;
+
+            // Body finished normally: keep its value and yield before the next iteration.
+            result = body.getResult();
+            body = null;
+            return StepResult.BOUNDARY;
+        }
+
+        @Override
+        public boolean isDone() { return done; }
+        @Override
+        public Object getResult() { return result; }
+        @Override
+        public void setSendValue(Object value) {
+            if (body != null) body.setSendValue(value);
+        }
+    }
+
+    /** {@code loop expr [infinite] do ... end} — re-evaluates the condition each iteration. */
+    public static class ConditionLoopStepper extends LoopStepper {
+        private final ProperTeeParser.ConditionLoopContext ctx;
+
+        public ConditionLoopStepper(ProperTeeInterpreter interp, ProperTeeParser.ConditionLoopContext ctx) {
+            super(interp, ctx.block(), ctx.K_INFINITE() != null);
+            this.ctx = ctx;
+        }
+
+        @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
+        @Override protected String infiniteHint() { return "loop condition infinite do"; }
+        @Override protected boolean advance() { return TypeChecker.isTruthy(interp.eval(ctx.expression())); }
+        @Override protected void bindCurrent() { /* no loop variable */ }
+    }
+
+    /** {@code loop v in iterable [infinite] do ... end} — iterates list values or map values. */
+    public static class ValueLoopStepper extends LoopStepper {
+        private final ProperTeeParser.ValueLoopContext ctx;
+        private final String valueVar;
+        private boolean sourceReady = false;
+        private List<Object> list;
+        private int listIndex = 0;
+        private Iterator<Map.Entry<String, Object>> mapIter;
+        private Object pendingValue;
+
+        public ValueLoopStepper(ProperTeeInterpreter interp, ProperTeeParser.ValueLoopContext ctx) {
+            super(interp, ctx.block(), ctx.K_INFINITE() != null);
+            this.ctx = ctx;
+            this.valueVar = ctx.value.getText();
+        }
+
+        @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
+        @Override protected String infiniteHint() { return "loop ... infinite do"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        protected boolean advance() {
+            if (!sourceReady) {
+                Object iterable = interp.eval(ctx.expression());
+                if (iterable instanceof List) {
+                    list = (List<Object>) iterable;
+                } else if (iterable instanceof Map) {
+                    mapIter = ((Map<String, Object>) iterable).entrySet().iterator();
+                } else {
+                    throw new ProperTeeError("Runtime Error: Cannot iterate over non-iterable value");
+                }
+                sourceReady = true;
+            }
+            if (list != null) {
+                if (listIndex >= list.size()) return false;
+                pendingValue = list.get(listIndex);
+                listIndex++;
+            } else {
+                if (!mapIter.hasNext()) return false;
+                pendingValue = mapIter.next().getValue();
+            }
+            return true;
+        }
+
+        @Override
+        protected void bindCurrent() {
+            ScopeStack ss = interp.getScopeStack();
+            Object v = TypeChecker.deepCopy(pendingValue);
+            if (!ss.isEmpty()) ss.set(valueVar, v); else interp.getVariables().put(valueVar, v);
+        }
+    }
+
+    /** {@code loop k, v in iterable [infinite] do ... end} — binds 1-based index/key and value. */
+    public static class KeyValueLoopStepper extends LoopStepper {
+        private final ProperTeeParser.KeyValueLoopContext ctx;
+        private final String keyVar;
+        private final String valueVar;
+        private boolean sourceReady = false;
+        private List<Object> list;
+        private int listIndex = 0;
+        private Iterator<Map.Entry<String, Object>> mapIter;
+        private Object pendingKey;
+        private Object pendingValue;
+
+        public KeyValueLoopStepper(ProperTeeInterpreter interp, ProperTeeParser.KeyValueLoopContext ctx) {
+            super(interp, ctx.block(), ctx.K_INFINITE() != null);
+            this.ctx = ctx;
+            this.keyVar = ctx.key.getText();
+            this.valueVar = ctx.value.getText();
+        }
+
+        @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
+        @Override protected String infiniteHint() { return "loop ... infinite do"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        protected boolean advance() {
+            if (!sourceReady) {
+                Object iterable = interp.eval(ctx.expression());
+                if (iterable instanceof List) {
+                    list = (List<Object>) iterable;
+                } else if (iterable instanceof Map) {
+                    mapIter = ((Map<String, Object>) iterable).entrySet().iterator();
+                } else {
+                    throw new ProperTeeError("Runtime Error: Cannot iterate over non-iterable value");
+                }
+                sourceReady = true;
+            }
+            if (list != null) {
+                if (listIndex >= list.size()) return false;
+                pendingKey = listIndex + 1; // 1-based index for arrays
+                pendingValue = list.get(listIndex);
+                listIndex++;
+            } else {
+                if (!mapIter.hasNext()) return false;
+                Map.Entry<String, Object> entry = mapIter.next();
+                pendingKey = entry.getKey();
+                pendingValue = entry.getValue();
+            }
+            return true;
+        }
+
+        @Override
+        protected void bindCurrent() {
+            ScopeStack ss = interp.getScopeStack();
+            Object v = TypeChecker.deepCopy(pendingValue);
+            if (!ss.isEmpty()) {
+                ss.set(keyVar, pendingKey);
+                ss.set(valueVar, v);
+            } else {
+                Map<String, Object> vars = interp.getVariables();
+                vars.put(keyVar, pendingKey);
+                vars.put(valueVar, v);
+            }
+        }
+    }
+
+    /**
      * Dispatch a statement to a suspendable sub-stepper, or return {@code null} to keep the eager
      * {@code eval()} path. Only constructs that can cooperatively suspend in statement position are
      * handled here; everything else stays eager.
@@ -497,6 +732,18 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     Stepper createStatementStepper(ProperTeeParser.StatementContext stmt) {
         if (stmt instanceof ProperTeeParser.IfStmtContext) {
             return new IfStepper(this, ((ProperTeeParser.IfStmtContext) stmt).ifStatement());
+        }
+        if (stmt instanceof ProperTeeParser.IterStmtContext) {
+            ProperTeeParser.IterationStmtContext loop = ((ProperTeeParser.IterStmtContext) stmt).iterationStmt();
+            if (loop instanceof ProperTeeParser.ConditionLoopContext) {
+                return new ConditionLoopStepper(this, (ProperTeeParser.ConditionLoopContext) loop);
+            }
+            if (loop instanceof ProperTeeParser.ValueLoopContext) {
+                return new ValueLoopStepper(this, (ProperTeeParser.ValueLoopContext) loop);
+            }
+            if (loop instanceof ProperTeeParser.KeyValueLoopContext) {
+                return new KeyValueLoopStepper(this, (ProperTeeParser.KeyValueLoopContext) loop);
+            }
         }
         return null;
     }
