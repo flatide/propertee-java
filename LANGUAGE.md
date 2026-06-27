@@ -679,7 +679,9 @@ end
 
 Only meaningful inside functions running within a `multi` block.
 
-> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` only applies to `SLEEP` at a statement's top level (or directly spawned as a worker, e.g. `thread a: SLEEP(500)`). When `SLEEP` runs **inside a `loop`, function, `if`, or `monitor` body**, the Java implementation honors it with a **blocking** `Thread.sleep` fallback: the sleep duration is correct, but it blocks the scheduler thread, so other `multi` workers and `monitor` ticks do **not** advance during that sleep. (Before this fix, a nested `SLEEP` was silently ignored and returned instantly.) Single-threaded scripts are unaffected. A future release will make nested `SLEEP` fully cooperative (as the propertee-js runtime already is).
+> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` (and spawning / async) works whenever it appears as a **statement** inside an `if`/`else` body, a `loop` body, a bare function-call statement (`worker()`), a `multi` worker body, or any nesting of these — other `multi` workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime).
+>
+> The one remaining case is a `SLEEP` reached through an **expression**, not a statement: an assignment right-hand side (`x = worker()`), an operator (`a + worker()`), an `if`/`loop` condition, a loop iterable, or a function argument. There the Java implementation falls back to a **blocking** `Thread.sleep` (correct duration, but it blocks the scheduler thread for that sleep). `monitor` bodies also run synchronously by design and use the same blocking fallback. Single-threaded scripts are unaffected. A future release will make these expression-embedded cases fully cooperative too.
 
 ## Built-in Functions
 
