@@ -1,4 +1,4 @@
-# ProperTee for Java v0.9.0
+# ProperTee for Java v1.0.0
 
 A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
 
@@ -34,7 +34,7 @@ java -jar build/libs/propertee-java-java8.jar
 
 ## TeeBox
 
-TeeBox (the HTTP execution proxy service) has been moved to a [separate repository](https://github.com/flatide/TeeBox). It depends on `propertee-core:0.9.0`.
+TeeBox (the HTTP execution proxy service) has been moved to a [separate repository](https://github.com/flatide/TeeBox). It depends on `propertee-core:1.0.0` (and will migrate to the separate Java 21+ virtual-thread runtime once that stabilizes).
 
 ## GitHub Releases
 

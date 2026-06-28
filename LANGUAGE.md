@@ -1,4 +1,4 @@
-# ProperTee Language Specification v0.9.0
+# ProperTee Language Specification v1.0.0
 
 ## Overview
 
@@ -679,7 +679,15 @@ end
 
 Only meaningful inside functions running within a `multi` block.
 
-> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` only applies to `SLEEP` at a statement's top level (or directly spawned as a worker, e.g. `thread a: SLEEP(500)`). When `SLEEP` runs **inside a `loop`, function, `if`, or `monitor` body**, the Java implementation honors it with a **blocking** `Thread.sleep` fallback: the sleep duration is correct, but it blocks the scheduler thread, so other `multi` workers and `monitor` ticks do **not** advance during that sleep. (Before this fix, a nested `SLEEP` was silently ignored and returned instantly.) Single-threaded scripts are unaffected. A future release will make nested `SLEEP` fully cooperative (as the propertee-js runtime already is).
+> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` (and spawning / async) works whenever it appears as a **statement** inside an `if`/`else` body, a `loop` body, a bare function-call statement (`worker()`), a `multi` worker body, or any nesting of these — other `multi` workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime).
+>
+> A few cases still run eagerly. They do **not** change results (timing and values stay correct) — they cost concurrency: while the eager region runs, other `multi` workers and `monitor` ticks pause.
+>
+> - **`SLEEP` reached through an expression** (not a statement): an assignment right-hand side (`x = worker()`), an operator (`a + worker()`), an `if`/`loop` condition, a loop iterable, or a function argument. Calling a function this way runs its **whole body eagerly**, so a `SLEEP` inside falls back to a **blocking** `Thread.sleep`.
+> - **The setup part of a `multi` block** runs eagerly. A `SLEEP` there (including a setup `loop` that spawns) blocks — so a `multi` nested inside a worker, whose setup sleeps, pauses the outer workers.
+> - **`monitor` bodies** run synchronously: a `SLEEP` there blocks, and an async function call there is a **runtime error**.
+>
+> Separately, async functions (`SHELL`, `HTTP`, host async externals) stay cooperative even in expressions — but they resume by re-running the statement, so side effects placed *before* an async call in the same statement run twice (keep such side effects on their own line). Single-threaded scripts are unaffected by the blocking cases above. A future release may make these fully cooperative.
 
 ## Built-in Functions
 
@@ -1113,6 +1121,12 @@ Common error conditions:
 ---
 
 ## Changelog
+
+### v1.0.0
+
+- **Cooperative statement-nesting (Strategy C).** `SLEEP` / `multi` spawning / async now suspend cooperatively when they appear in **statement position** inside `if`/`else` bodies, all three `loop` bodies, bare user-function-call statements (`foo()`), `multi` worker bodies, and any nesting of these — other workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime). Previously a nested `SLEEP` used a blocking `Thread.sleep` fallback that froze the scheduler.
+- **Remaining eager seams documented.** A `SLEEP` reached only through an *expression* (assignment RHS, operators, conditions, iterables, arguments), the `multi` setup phase, and `monitor` bodies still run eagerly; async stays cooperative everywhere but resumes via statement replay. These do not affect result correctness (except the async-replay side-effect caveat) — they cost concurrency. Closing them fully is the goal of the separate Java 21+ (virtual-thread) runtime.
+- **This is the final feature release of the frozen Java 7/8 line.** Subsequent work moves to the Java 21+ runtime; v1.0.0 receives critical fixes only.
 
 ### v0.9.0
 

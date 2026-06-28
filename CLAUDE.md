@@ -2,9 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is (v0.9.0)
+## What This Is (v1.0.0)
 
 ProperTee Java is a Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language. It uses ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** (replacing the JavaScript generator-based approach from [propertee-js](https://github.com/flatide/propertee-js)). Every statement visitor produces a Stepper object; a central scheduler round-robins between threads at statement boundaries.
+
+> **v1.0.0 is the frozen Java 7/8-compatible line.** It is the stable runtime for the legacy expression-evaluator server. Active development of the fully-cooperative runtime (Strategy B — virtual-thread coroutines, requiring Java 21+) continues in a **separate project** consumed by TeeBox; this codebase receives critical fixes only. See the "Remaining eager seams" section for what the Strategy B runtime is intended to resolve.
 
 ## Project Structure
 
@@ -108,13 +110,23 @@ interface Stepper {
 }
 ```
 
-- **Statement visitors** return multi-step Steppers (`BlockStepper`, `RootStepper`, `FunctionCallStepper`, etc.) that yield `StepResult.BOUNDARY` between statements.
+- **Statement visitors** are driven by `StatementListStepper` (the single engine behind `RootStepper`, multi-block workers, and control-flow bodies) plus the control-flow sub-steppers (`IfStepper`, `LoopStepper` family, `UserCallStepper`) that yield `StepResult.BOUNDARY` between statements.
 - **Expression visitors** evaluate eagerly via `eval()` — expressions are atomic, never yielding mid-evaluation.
 - `StepResult.boundary()` = statement boundary (thread stays READY)
 - `StepResult.command(cmd)` = scheduler command (SLEEP, SPAWN_THREADS, AWAIT_ASYNC)
 - `StepResult.done(value)` = stepper completed with result
 
-**Limitation — nested eager path is a blocking fallback.** Cooperative suspension (`SchedulerCommand`, e.g. `SLEEP`) only yields to the scheduler at the *statement-stepper* level. Loop / function / `if` bodies run eagerly through `evalBlock`/`callUserFunction`, which cannot suspend mid-construct. So a `SLEEP` inside such a body is honored with a **blocking `Thread.sleep` fallback** (`ProperTeeInterpreter.evalBlock`) rather than a cooperative yield — correct timing, but it blocks the scheduler thread for that sleep (single-threaded scripts are unaffected; top-level and directly-spawned-worker SLEEP stay cooperative — the latter via `CommandThenDoneStepper`). The full cooperative fix (stepper-driven loops/functions, matching propertee-js) is tracked separately. Regression coverage: `SleepNestingTest`.
+**Cooperative nesting (Strategy C).** Cooperative suspension (`SchedulerCommand` — `SLEEP`/`SPAWN_THREADS`/`AWAIT_ASYNC`) yields to the scheduler whenever the suspending construct appears in **statement position** inside an `if`/`else` body, any of the three `loop` bodies, a bare user-function-call statement (`foo()`), a multi-block worker body, or any nesting of these. This is implemented by driving such constructs as `child` sub-steppers of `StatementListStepper` (`IfStepper`, `ConditionLoopStepper`/`ValueLoopStepper`/`KeyValueLoopStepper`, `UserCallStepper`); their `BOUNDARY`/`COMMAND` results relay upward while Break/Continue/Return unwind as exceptions through `child.step()`, exactly as they did through the eager `evalBlock` call stack. Loops also yield a BOUNDARY **between iterations**, so multi workers now interleave per-iteration (matching the propertee-js generator model — previously a worker ran its whole loop before yielding).
+
+**Remaining eager seams.** Cooperative suspension only happens at the *statement-stepper* level, so several paths still run eagerly. None of these affect correctness of results (except the async-replay one below); they cost **concurrency/fairness** — while an eager region runs, other `multi` workers and `monitor` ticks do not advance.
+
+1. **`SLEEP` reached through an expression-embedded call.** When a suspending construct is inside an expression rather than a statement — assignment RHS (`x = foo()`), operators (`a + foo()`), `if`/`loop` conditions, loop iterables, function arguments — it is evaluated via `evalBlock`/`callUserFunction`. Entering `callUserFunction` makes the **entire called subtree eager** (its loops/ifs/bare calls do *not* use the cooperative sub-steppers), so a `SLEEP` anywhere inside is honored with a **blocking `Thread.sleep` fallback**: correct timing, but it blocks the scheduler thread. This is the primary seam (e.g. `x = pollUntilReady()` where the helper sleeps).
+2. **`multi` setup phase is eager.** `visitParallelStmt` runs the setup block via `evalBlock(ctx.block())` to collect spawns, then yields `SPAWN_THREADS`. A `SLEEP` in the setup phase (including a setup `loop` that spawns) blocks — so a **nested `multi` inside a worker** whose setup sleeps stalls the outer workers.
+3. **Eager-subtree fairness (no `SLEEP` needed).** A long `loop` inside an expression-called function (`x = heavyFn()`) holds the scheduler until the whole statement finishes, even without any suspension — it cannot yield between iterations. Bounded by the loop iteration limit, but still a fairness gap.
+4. **Async uses statement replay (correctness caveat).** Async external functions (`registerExternalAsync`, e.g. `SHELL`/`HTTP`) are cooperative *everywhere* — the thread goes `BLOCKED`, not blocking the scheduler — but resumption **re-executes the whole statement** from cache. Side effects in that statement *before* the async call (or in a replayed eager subtree) run twice. See "Side-effect replay on statement retry" in the async section.
+5. **Monitor bodies.** Run synchronously by design (via `evalBlock`): a `SLEEP` there blocks (fallback), and an **async call there is a runtime error** (`'…' cannot be called in monitor blocks`).
+
+Single-threaded scripts are unaffected by 1–3 (nothing else needs to run). Closing seams 1–3 requires expression-level / fully-coroutine stepping (Strategy A, or Strategy B threads — the latter best revisited on Java 21 virtual threads); 4 is also resolved by true coroutine suspension (no replay). Regression coverage: `SleepNestingTest` (timing) and `CooperativeNestingTest` (cooperative interleaving: overlap ~1× vs serialized ~2×; plus scope cleanup on exceptional exit).
 
 ### Package Structure
 
@@ -141,7 +153,7 @@ interface Stepper {
 | File | Role |
 |---|---|
 | `propertee-core/grammar/ProperTee.g4` | ANTLR4 grammar — defines all syntax. Semicolons are whitespace (part of WS rule). `thread` keyword for spawning in multi blocks. `multi resultVar do ... end` syntax with optional result collection. Thread spawn keys reuse the `access` rule (same as property access): `thread key:`, `thread "key":`, `thread 42:`, `thread $var:`, `thread $::var:`, `thread $(expr):`, `thread :` (unnamed). `arrayLiteral` has two alternatives: `RangeArray` (`[start..end]` or `[start..end, step]`) and `ListArray` (`[1, 2, 3]`). Object keys must be quoted strings or integers — bare identifiers are not allowed (`{"name": "Alice"}`, not `{name: "Alice"}`). |
-| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper). `visitSpawnKeyStmt` resolves key from `access` context (StaticAccess, StringKeyAccess, ArrayAccess, VarEvalAccess, EvalAccess). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Integer keys on objects become string keys in `getProperty()`. `resolveAndValidateDynamicKey()` auto-coerces dynamic keys to string via `TO_STRING()` (empty treated as unnamed, no duplicates). |
+| `ProperTeeInterpreter.java` | Main visitor. All `visit*` methods plus inner Stepper classes: `StatementListStepper` (unified statement-list engine; `RootStepper` is a thin subclass) and the cooperative control-flow sub-steppers `IfStepper`, `ConditionLoopStepper`/`ValueLoopStepper`/`KeyValueLoopStepper` (share the `LoopStepper` base), and `UserCallStepper`. `createStatementStepper()` dispatches a statement to a sub-stepper (or returns null to keep the eager `eval()` path); `bareUserCall()` detects a bare user-function-call statement. `visitSpawnKeyStmt` resolves key from `access` context (StaticAccess, StringKeyAccess, ArrayAccess, VarEvalAccess, EvalAccess). `visitParallelStmt` resolves auto-keys (`#1`, `#2`) for unnamed threads and detects collisions with explicit keys before passing to scheduler. `eval()` for expressions, `createStepper()` for statements. Integer keys on objects become string keys in `getProperty()`. `resolveAndValidateDynamicKey()` auto-coerces dynamic keys to string via `TO_STRING()` (empty treated as unnamed, no duplicates). |
 | `BuiltinFunctions.java` | Built-in functions: pure (string matching, map extensions, JSON, TYPE_OF), host-gated (ENV, file I/O via PlatformProvider), shell (SHELL, SHELL_CTX via TaskRunner). Internal registration uses private `registerResult()`/`registerResultAsync()`; host injection uses public `registerExternal()`/`registerExternalAsync()`. `SHELL` is async via `registerResultAsync`. `PrintFunction` interface takes `Object[]` args, not `String` |
 | `PlatformProvider.java` | Interface for host-gated OS capabilities (ENV, file I/O). `DefaultPlatformProvider` provides unrestricted access; `UnsupportedPlatformProvider` rejects all calls. Hosts implement this to apply path restrictions, read-only policies, etc. |
 | `Scheduler.java` | Round-robin scheduler. Manages thread state, SLEEP timers, MULTI block spawning. Pre-builds result collection with `Result.running()` at spawn time (all keys pre-resolved by interpreter, including auto-keys `"#1"`, `"#2"` for unnamed threads), updates entries in-place as threads complete, injects result collection into monitor scope for live status reads |
@@ -279,7 +291,7 @@ BLOCKED → READY                    (async future completed or timed out)
 
 ### Flow Control
 
-`BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: loops catch break/continue, function call steppers catch return, statement-level steppers (RootStepper, BlockStepper, FunctionCallStepper, ThreadGeneratorStepper) catch `AsyncPendingException` and return `AWAIT_ASYNC` command for retry.
+`BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: `LoopStepper` catches break/continue (around `child.step()`); a `StatementListStepper` with `catchReturn=true` (top level / function / worker) catches return while `catchReturn=false` (if/loop bodies) lets it unwind to the enclosing function; the statement-list and sub-steppers catch `AsyncPendingException` and return an `AWAIT_ASYNC` command for retry.
 
 ## TaskRunner (`com.flatide.task`)
 
@@ -471,7 +483,7 @@ visitor.setIgnoredFunctions(ignored);
 
 ## CI / Releases
 
-GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts. It is **manual-only** (`workflow_dispatch`) — it does **not** run automatically on tag push; trigger it from the Actions tab ("Run workflow") and supply the existing tag (e.g. `v0.9.0`) to build and release. Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
+GitHub Actions workflow (`.github/workflows/release-artifacts.yml`) publishes build artifacts. It is **manual-only** (`workflow_dispatch`) — it does **not** run automatically on tag push; trigger it from the Actions tab ("Run workflow") and supply the existing tag (e.g. `v1.0.0`) to build and release. Published assets: `propertee-java-java7.jar`, `propertee-java-java8.jar`.
 
 ## Dependencies
 

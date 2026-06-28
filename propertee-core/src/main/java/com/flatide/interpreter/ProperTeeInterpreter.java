@@ -190,11 +190,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return new RootStepper(this, ctx);
     }
 
-    public Stepper createBlockStepper(ProperTeeParser.BlockContext ctx) {
-        return new BlockStepper(this, ctx);
-    }
-
-    // --- Root and Block Steppers (inner classes) ---
+    // --- Statement-list Stepper (inner classes) ---
 
     /**
      * Process collected results from SPAWN_THREADS command (sent back by scheduler).
@@ -218,26 +214,101 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
     }
 
-    /** Root stepper: runs all statements with boundaries, catches ReturnException */
-    public static class RootStepper implements Stepper {
+    /**
+     * Drives a flat list of statements, yielding a BOUNDARY between each so the scheduler can
+     * round-robin at statement granularity. Honors SchedulerCommands (SLEEP/SPAWN_THREADS) and
+     * AsyncPendingException returned by {@code eval()} of a statement, and feeds SPAWN_THREADS
+     * results back via {@link #setSendValue}.
+     *
+     * <p>This is the single engine behind the top-level script ({@link RootStepper}), each
+     * multi-block worker (function body), and — when driving a {@code child} sub-stepper — the
+     * bodies of control-flow constructs (e.g. {@link IfStepper}). Three policies parameterize it:
+     * <ul>
+     *   <li>{@code localScope} — when non-null, pushed before the first statement and popped on
+     *       completion (function/worker bodies). When null, no scope is pushed (top level, and
+     *       if/loop bodies which share the enclosing scope).</li>
+     *   <li>{@code emptyObjectOnFallthrough} — when a body completes without an explicit
+     *       {@code return}: workers/functions yield an empty object ({@code {}}); the top level and
+     *       control-flow bodies yield the last statement's value.</li>
+     *   <li>{@code catchReturn} — when true, a {@code return} ends this stepper with the returned
+     *       value (top level / function / worker). When false (if/loop bodies), {@code return}
+     *       propagates up so it unwinds to the enclosing function, matching the eager model.</li>
+     * </ul>
+     *
+     * <p>Cooperative nesting: a statement that is itself a suspendable control-flow construct is run
+     * as a {@code child} sub-stepper rather than evaluated eagerly. BOUNDARY/COMMAND results from the
+     * child are relayed upward (the child stays active across suspension); Break/Continue/Return
+     * unwind through {@code child.step()} as exceptions, exactly as they did through the eager
+     * {@code evalBlock} call stack. Statements with no sub-stepper (assignment, plain expression,
+     * multi, flow control) keep the original eager {@code eval()} path.
+     */
+    public static class StatementListStepper implements Stepper {
         private final ProperTeeInterpreter interp;
         private final List<ProperTeeParser.StatementContext> statements;
+        private final Map<String, Object> localScope;
+        private final boolean emptyObjectOnFallthrough;
+        private final boolean catchReturn;
         private int index = 0;
         private Object result = null;
         private boolean hasExplicitReturn = false;
         private boolean done = false;
         private boolean yieldBoundary = false;
+        private boolean scopePushed = false;
         private Object sendValue;
         private boolean waitingForSpawn = false;
+        private Stepper child; // active control-flow sub-stepper (null when none)
 
-        public RootStepper(ProperTeeInterpreter interp, ProperTeeParser.RootContext ctx) {
+        public StatementListStepper(ProperTeeInterpreter interp,
+                                    List<ProperTeeParser.StatementContext> statements,
+                                    Map<String, Object> localScope,
+                                    boolean emptyObjectOnFallthrough) {
+            this(interp, statements, localScope, emptyObjectOnFallthrough, true);
+        }
+
+        public StatementListStepper(ProperTeeInterpreter interp,
+                                    List<ProperTeeParser.StatementContext> statements,
+                                    Map<String, Object> localScope,
+                                    boolean emptyObjectOnFallthrough,
+                                    boolean catchReturn) {
             this.interp = interp;
-            this.statements = ctx.statement();
+            this.statements = statements;
+            this.localScope = localScope;
+            this.emptyObjectOnFallthrough = emptyObjectOnFallthrough;
+            this.catchReturn = catchReturn;
         }
 
         @Override
         public StepResult step() {
             if (done) return StepResult.done(result);
+
+            if (localScope != null && !scopePushed) {
+                interp.getScopeStack().push(localScope);
+                scopePushed = true;
+            }
+
+            try {
+                return stepAfterPush();
+            } catch (AsyncPendingException e) {
+                throw e; // resumed later — keep the local scope pushed
+            } catch (RuntimeException e) {
+                // Exceptional exit (Break/Continue, an uncaught return, or a runtime error): finish()
+                // will not run, so pop the local scope here, mirroring the try/finally in the eager
+                // callUserFunction. Without this, a control-flow exception unwinding out of a scoped
+                // body (e.g. `break` inside a called function) leaks the callee's locals onto the
+                // thread's scope stack, which an outer loop that catches the exception would then see.
+                if (scopePushed) {
+                    interp.getScopeStack().pop();
+                    scopePushed = false;
+                }
+                throw e;
+            }
+        }
+
+        private StepResult stepAfterPush() {
+            // Resume an active control-flow sub-stepper before anything else.
+            if (child != null) {
+                return driveChild();
+            }
 
             // Process SPAWN_THREADS results
             if (waitingForSpawn && sendValue != null) {
@@ -249,9 +320,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     yieldBoundary = true;
                     return StepResult.BOUNDARY;
                 } else {
-                    done = true;
-                    result = null;
-                    return StepResult.done(result);
+                    return finishFallthrough();
                 }
             }
 
@@ -261,6 +330,14 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
 
             if (index < statements.size()) {
+                // Suspendable control-flow constructs run as a child sub-stepper so a nested
+                // SLEEP/spawn/async yields cooperatively instead of blocking the scheduler.
+                Stepper sub = interp.createStatementStepper(statements.get(index));
+                if (sub != null) {
+                    child = sub;
+                    return driveChild();
+                }
+
                 try {
                     result = interp.eval(statements.get(index));
                     if (result instanceof SchedulerCommand) {
@@ -278,19 +355,65 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         yieldBoundary = true;
                         return StepResult.BOUNDARY;
                     } else {
-                        done = true;
-                        return StepResult.done(result);
+                        return finishFallthrough();
                     }
                 } catch (ReturnException e) {
+                    if (!catchReturn) throw e;
                     hasExplicitReturn = true;
-                    result = e.getValue();
-                    done = true;
-                    return StepResult.done(result);
+                    return finish(e.getValue());
                 } catch (AsyncPendingException e) {
                     return StepResult.command(SchedulerCommand.awaitAsync());
                 }
             }
 
+            return finishFallthrough();
+        }
+
+        /** Advance the active {@code child} sub-stepper and relay/translate its result. */
+        private StepResult driveChild() {
+            StepResult r;
+            try {
+                r = child.step();
+            } catch (AsyncPendingException e) {
+                // The child's current statement is async-pending; keep the child for replay.
+                return StepResult.command(SchedulerCommand.awaitAsync());
+            } catch (ReturnException e) {
+                child = null;
+                if (!catchReturn) throw e; // unwind to the enclosing function/worker
+                hasExplicitReturn = true;
+                return finish(e.getValue());
+            }
+            // BreakException/ContinueException/ProperTeeError propagate uncaught, unwinding through
+            // this step() just as they unwound through the eager evalBlock call stack.
+
+            if (r.isBoundary() || r.isCommand()) {
+                return r; // child stays active across the yield/suspension
+            }
+
+            // Child completed: adopt its value as this statement's result, then advance.
+            result = child.getResult();
+            child = null;
+            if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
+            index++;
+            if (index < statements.size()) {
+                yieldBoundary = true;
+                return StepResult.BOUNDARY;
+            }
+            return finishFallthrough();
+        }
+
+        private StepResult finishFallthrough() {
+            // No explicit return reached. Top level / control-flow bodies keep the last statement
+            // value (result); function/worker bodies yield an empty object.
+            return finish(emptyObjectOnFallthrough ? new LinkedHashMap<String, Object>() : result);
+        }
+
+        private StepResult finish(Object val) {
+            if (scopePushed) {
+                interp.getScopeStack().pop();
+                scopePushed = false;
+            }
+            result = val;
             done = true;
             return StepResult.done(result);
         }
@@ -301,76 +424,181 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         public Object getResult() { return result; }
         public boolean hasExplicitReturn() { return hasExplicitReturn; }
         @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
+        public void setSendValue(Object value) {
+            // Route spawn-result / async-resume payloads to the deepest active sub-stepper, which is
+            // the one that actually issued the command.
+            if (child != null) {
+                child.setSendValue(value);
+            } else {
+                this.sendValue = value;
+            }
+        }
     }
 
-    /** Block stepper: runs all statements with boundaries */
-    public static class BlockStepper implements Stepper {
+    /** Top-level script driver: no local scope, last-statement value on fallthrough. */
+    public static class RootStepper extends StatementListStepper {
+        public RootStepper(ProperTeeInterpreter interp, ProperTeeParser.RootContext ctx) {
+            super(interp, ctx.statement(), null, false, true);
+        }
+    }
+
+    /**
+     * Cooperative {@code if}/{@code else}: evaluates the condition once (eagerly — a suspendable call
+     * embedded in the condition expression is the documented eager seam), then drives the chosen
+     * branch as a child block stepper so a SLEEP/spawn/async in the branch body yields cooperatively.
+     * Mirrors {@link #visitIfStatement}: no new scope, branch value (or empty when no branch taken).
+     */
+    public static class IfStepper implements Stepper {
         private final ProperTeeInterpreter interp;
-        private final List<ProperTeeParser.StatementContext> statements;
-        private int index = 0;
+        private final ProperTeeParser.IfStatementContext ctx;
+        private Stepper body; // chosen branch (null until evaluated, or if no branch taken)
+        private boolean evaluated = false;
         private Object result = null;
         private boolean done = false;
-        private boolean yieldBoundary = false;
-        private Object sendValue;
-        private boolean waitingForSpawn = false;
 
-        public BlockStepper(ProperTeeInterpreter interp, ProperTeeParser.BlockContext ctx) {
+        public IfStepper(ProperTeeInterpreter interp, ProperTeeParser.IfStatementContext ctx) {
             this.interp = interp;
-            this.statements = ctx.statement();
+            this.ctx = ctx;
         }
 
         @Override
         public StepResult step() {
             if (done) return StepResult.done(result);
 
-            if (waitingForSpawn && sendValue != null) {
-                processSpawnResults(interp, sendValue);
-                sendValue = null;
-                waitingForSpawn = false;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
+            if (!evaluated) {
+                interp.checkKeywordAllowed("if", ctx);
+                Object condition;
+                try {
+                    condition = interp.eval(ctx.condition);
+                } catch (AsyncPendingException e) {
+                    // Async in the condition: retry on resume (evaluated stays false).
+                    return StepResult.command(SchedulerCommand.awaitAsync());
+                }
+                evaluated = true;
+                ProperTeeParser.BlockContext branch = null;
+                if (TypeChecker.isTruthy(condition)) {
+                    branch = ctx.thenBody;
+                } else if (ctx.elseBody != null) {
+                    branch = ctx.elseBody;
+                }
+                if (branch == null) {
                     done = true;
-                    result = null;
+                    return StepResult.done(result); // null, matching visitIfStatement
+                }
+                // catchReturn=false: a return inside the branch unwinds to the enclosing function.
+                body = new StatementListStepper(interp, branch.statement(), null, false, false);
+            }
+
+            StepResult r = body.step();
+            if (r.isDone()) {
+                result = body.getResult();
+                done = true;
+                return StepResult.done(result);
+            }
+            return r; // BOUNDARY / COMMAND pass through; body stays active
+        }
+
+        @Override
+        public boolean isDone() { return done; }
+        @Override
+        public Object getResult() { return result; }
+        @Override
+        public void setSendValue(Object value) {
+            if (body != null) body.setSendValue(value);
+        }
+    }
+
+    /**
+     * Cooperative loop base. Drives each iteration's body as a child block stepper (so a nested
+     * SLEEP/spawn/async yields to the scheduler) and yields a BOUNDARY between iterations for
+     * round-robin fairness. Faithfully mirrors the eager loop visitors: keyword-hide check,
+     * iteration-limit enforcement (including the "warn" behavior), Break/Continue handling,
+     * last-body-value result, and no new scope for the body (it shares the enclosing scope). A
+     * {@code return} inside the body unwinds past the loop to the enclosing function (the body
+     * stepper uses {@code catchReturn=false}). A suspendable call embedded in the condition/iterable
+     * expression is the documented eager seam, but async there is still honored: the iteration source
+     * is re-evaluated on resume (awaitAsync retry).
+     *
+     * <p>Subclasses supply the iteration source via {@link #advance()} (stage the next element,
+     * binding nothing) and {@link #bindCurrent()} (bind loop variables). Binding happens after the
+     * limit check, exactly as in the eager loops.
+     */
+    public abstract static class LoopStepper implements Stepper {
+        protected final ProperTeeInterpreter interp;
+        private final ProperTeeParser.BlockContext block;
+        private final boolean isInfinite;
+        private int iterations = 0;
+        private Object result = null;
+        private boolean started = false;
+        private boolean done = false;
+        private Stepper body;
+
+        protected LoopStepper(ProperTeeInterpreter interp, ProperTeeParser.BlockContext block, boolean isInfinite) {
+            this.interp = interp;
+            this.block = block;
+            this.isInfinite = isInfinite;
+        }
+
+        /** Context for keyword-hide checks and iteration-limit errors. */
+        protected abstract org.antlr.v4.runtime.ParserRuleContext ctx();
+        /** Hint shown in the iteration-limit error (e.g. {@code "loop ... infinite do"}). */
+        protected abstract String infiniteHint();
+        /** Stage the next element (no binding); return false when the source is exhausted. */
+        protected abstract boolean advance();
+        /** Bind the staged loop variable(s); called only after the limit check passes. */
+        protected abstract void bindCurrent();
+
+        @Override
+        public StepResult step() {
+            if (done) return StepResult.done(result);
+            if (!started) {
+                interp.checkKeywordAllowed("loop", ctx());
+                started = true;
+            }
+
+            if (body == null) {
+                boolean hasNext;
+                try {
+                    hasNext = advance();
+                } catch (AsyncPendingException e) {
+                    return StepResult.command(SchedulerCommand.awaitAsync());
+                }
+                if (!hasNext) {
+                    done = true;
                     return StepResult.done(result);
                 }
-            }
-
-            if (yieldBoundary) {
-                yieldBoundary = false;
-                return StepResult.BOUNDARY;
-            }
-
-            if (index < statements.size()) {
-                try {
-                    result = interp.eval(statements.get(index));
-                    if (result instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) result;
-                        result = null;
-                        index++;
-                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                            waitingForSpawn = true;
-                        }
-                        return StepResult.command(cmd);
-                    }
-                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
-                    index++;
-                    if (index < statements.size()) {
-                        yieldBoundary = true;
-                        return StepResult.BOUNDARY;
-                    } else {
+                int limit = isInfinite ? Integer.MAX_VALUE : interp.maxIterations;
+                if (++iterations > limit) {
+                    if ("warn".equals(interp.iterationLimitBehavior)) {
+                        interp.stderr.print(new Object[]{"Warning: Loop exceeded maximum iterations (" + limit + "), stopping loop"});
                         done = true;
                         return StepResult.done(result);
                     }
-                } catch (AsyncPendingException e) {
-                    return StepResult.command(SchedulerCommand.awaitAsync());
+                    throw interp.createError(
+                        "Loop exceeded maximum iterations (" + limit + "). Use '" + infiniteHint() + "' if you need unlimited iterations.",
+                        ctx());
                 }
+                bindCurrent();
+                body = new StatementListStepper(interp, block.statement(), null, false, false);
             }
 
-            done = true;
-            return StepResult.done(result);
+            StepResult r;
+            try {
+                r = body.step();
+            } catch (BreakException e) {
+                body = null;
+                done = true;
+                return StepResult.done(result);
+            } catch (ContinueException e) {
+                body = null;
+                return StepResult.BOUNDARY; // between-iteration yield; next step starts the next iteration
+            }
+            if (r.isBoundary() || r.isCommand()) return r;
+
+            // Body finished normally: keep its value and yield before the next iteration.
+            result = body.getResult();
+            body = null;
+            return StepResult.BOUNDARY;
         }
 
         @Override
@@ -378,92 +606,213 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         @Override
         public Object getResult() { return result; }
         @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
+        public void setSendValue(Object value) {
+            if (body != null) body.setSendValue(value);
+        }
     }
 
-    /** FunctionCall stepper: pushes scope, runs body with boundaries, pops scope */
-    public static class FunctionCallStepper implements Stepper {
+    /** {@code loop expr [infinite] do ... end} — re-evaluates the condition each iteration. */
+    public static class ConditionLoopStepper extends LoopStepper {
+        private final ProperTeeParser.ConditionLoopContext ctx;
+
+        public ConditionLoopStepper(ProperTeeInterpreter interp, ProperTeeParser.ConditionLoopContext ctx) {
+            super(interp, ctx.block(), ctx.K_INFINITE() != null);
+            this.ctx = ctx;
+        }
+
+        @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
+        @Override protected String infiniteHint() { return "loop condition infinite do"; }
+        @Override protected boolean advance() { return TypeChecker.isTruthy(interp.eval(ctx.expression())); }
+        @Override protected void bindCurrent() { /* no loop variable */ }
+    }
+
+    /** {@code loop v in iterable [infinite] do ... end} — iterates list values or map values. */
+    public static class ValueLoopStepper extends LoopStepper {
+        private final ProperTeeParser.ValueLoopContext ctx;
+        private final String valueVar;
+        private boolean sourceReady = false;
+        private List<Object> list;
+        private int listIndex = 0;
+        private Iterator<Map.Entry<String, Object>> mapIter;
+        private Object pendingValue;
+
+        public ValueLoopStepper(ProperTeeInterpreter interp, ProperTeeParser.ValueLoopContext ctx) {
+            super(interp, ctx.block(), ctx.K_INFINITE() != null);
+            this.ctx = ctx;
+            this.valueVar = ctx.value.getText();
+        }
+
+        @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
+        @Override protected String infiniteHint() { return "loop ... infinite do"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        protected boolean advance() {
+            if (!sourceReady) {
+                Object iterable = interp.eval(ctx.expression());
+                if (iterable instanceof List) {
+                    list = (List<Object>) iterable;
+                } else if (iterable instanceof Map) {
+                    mapIter = ((Map<String, Object>) iterable).entrySet().iterator();
+                } else {
+                    throw new ProperTeeError("Runtime Error: Cannot iterate over non-iterable value");
+                }
+                sourceReady = true;
+            }
+            if (list != null) {
+                if (listIndex >= list.size()) return false;
+                pendingValue = list.get(listIndex);
+                listIndex++;
+            } else {
+                if (!mapIter.hasNext()) return false;
+                pendingValue = mapIter.next().getValue();
+            }
+            return true;
+        }
+
+        @Override
+        protected void bindCurrent() {
+            ScopeStack ss = interp.getScopeStack();
+            Object v = TypeChecker.deepCopy(pendingValue);
+            if (!ss.isEmpty()) ss.set(valueVar, v); else interp.getVariables().put(valueVar, v);
+        }
+    }
+
+    /** {@code loop k, v in iterable [infinite] do ... end} — binds 1-based index/key and value. */
+    public static class KeyValueLoopStepper extends LoopStepper {
+        private final ProperTeeParser.KeyValueLoopContext ctx;
+        private final String keyVar;
+        private final String valueVar;
+        private boolean sourceReady = false;
+        private List<Object> list;
+        private int listIndex = 0;
+        private Iterator<Map.Entry<String, Object>> mapIter;
+        private Object pendingKey;
+        private Object pendingValue;
+
+        public KeyValueLoopStepper(ProperTeeInterpreter interp, ProperTeeParser.KeyValueLoopContext ctx) {
+            super(interp, ctx.block(), ctx.K_INFINITE() != null);
+            this.ctx = ctx;
+            this.keyVar = ctx.key.getText();
+            this.valueVar = ctx.value.getText();
+        }
+
+        @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
+        @Override protected String infiniteHint() { return "loop ... infinite do"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        protected boolean advance() {
+            if (!sourceReady) {
+                Object iterable = interp.eval(ctx.expression());
+                if (iterable instanceof List) {
+                    list = (List<Object>) iterable;
+                } else if (iterable instanceof Map) {
+                    mapIter = ((Map<String, Object>) iterable).entrySet().iterator();
+                } else {
+                    throw new ProperTeeError("Runtime Error: Cannot iterate over non-iterable value");
+                }
+                sourceReady = true;
+            }
+            if (list != null) {
+                if (listIndex >= list.size()) return false;
+                pendingKey = listIndex + 1; // 1-based index for arrays
+                pendingValue = list.get(listIndex);
+                listIndex++;
+            } else {
+                if (!mapIter.hasNext()) return false;
+                Map.Entry<String, Object> entry = mapIter.next();
+                pendingKey = entry.getKey();
+                pendingValue = entry.getValue();
+            }
+            return true;
+        }
+
+        @Override
+        protected void bindCurrent() {
+            ScopeStack ss = interp.getScopeStack();
+            Object v = TypeChecker.deepCopy(pendingValue);
+            if (!ss.isEmpty()) {
+                ss.set(keyVar, pendingKey);
+                ss.set(valueVar, v);
+            } else {
+                Map<String, Object> vars = interp.getVariables();
+                vars.put(keyVar, pendingKey);
+                vars.put(valueVar, v);
+            }
+        }
+    }
+
+    /**
+     * Cooperative call of a user function appearing as a bare statement ({@code foo()}). Evaluates
+     * the argument expressions eagerly (a suspendable call embedded in an argument is the documented
+     * eager seam, but async there is honored via awaitAsync retry), then runs the function body as a
+     * child stepper so a SLEEP/spawn/async in the body yields cooperatively. Mirrors
+     * {@link #callUserFunction}: arg-count validation, missing args default to {@code {}}, body runs
+     * in a fresh local scope, and the result is the returned value (or {@code {}} on fallthrough).
+     *
+     * <p>Only bare user-function calls route here. Builtins (which may return a SchedulerCommand
+     * handled by the eager path), ignored functions, and calls embedded in larger expressions keep
+     * the eager {@code eval()} path.
+     */
+    public static class UserCallStepper implements Stepper {
         private final ProperTeeInterpreter interp;
-        private final FunctionDef funcDef;
-        private final Map<String, Object> localScope;
-        private final List<ProperTeeParser.StatementContext> statements;
-        private int index = 0;
+        private final ProperTeeParser.FunctionCallContext call;
+        private Stepper body;
+        private boolean prepared = false;
         private Object result = null;
         private boolean done = false;
-        private boolean yieldBoundary = false;
-        private boolean scopePushed = false;
-        private Object sendValue;
-        private boolean waitingForSpawn = false;
 
-        public FunctionCallStepper(ProperTeeInterpreter interp, FunctionDef funcDef,
-                                    Map<String, Object> localScope) {
+        public UserCallStepper(ProperTeeInterpreter interp, ProperTeeParser.FunctionCallContext call) {
             this.interp = interp;
-            this.funcDef = funcDef;
-            this.localScope = localScope;
-            this.statements = funcDef.getBody().statement();
+            this.call = call;
         }
 
         @Override
         public StepResult step() {
             if (done) return StepResult.done(result);
 
-            if (!scopePushed) {
-                interp.getScopeStack().push(localScope);
-                scopePushed = true;
-            }
+            if (!prepared) {
+                String funcName = call.funcName.getText();
+                FunctionDef funcDef = interp.userDefinedFunctions.get(funcName);
+                List<String> params = funcDef.getParams();
 
-            if (waitingForSpawn && sendValue != null) {
-                processSpawnResults(interp, sendValue);
-                sendValue = null;
-                waitingForSpawn = false;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
-                    return finish(new LinkedHashMap<String, Object>());
-                }
-            }
-
-            if (yieldBoundary) {
-                yieldBoundary = false;
-                return StepResult.BOUNDARY;
-            }
-
-            if (index < statements.size()) {
+                List<Object> args = new ArrayList<Object>();
                 try {
-                    Object evalResult = interp.eval(statements.get(index));
-                    if (evalResult instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) evalResult;
-                        result = null;
-                        index++;
-                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                            waitingForSpawn = true;
+                    if (call.expression() != null) {
+                        for (ProperTeeParser.ExpressionContext exprCtx : call.expression()) {
+                            args.add(interp.eval(exprCtx));
                         }
-                        return StepResult.command(cmd);
                     }
-                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
-                    index++;
-                    if (index < statements.size()) {
-                        yieldBoundary = true;
-                        return StepResult.BOUNDARY;
-                    } else {
-                        return finish(new LinkedHashMap<String, Object>());
-                    }
-                } catch (ReturnException e) {
-                    return finish(e.getValue());
                 } catch (AsyncPendingException e) {
+                    // An argument is async-pending; retry on resume (args re-evaluated).
                     return StepResult.command(SchedulerCommand.awaitAsync());
                 }
+
+                if (args.size() > params.size()) {
+                    throw interp.createError(
+                        "Function '" + funcName + "' expects " + params.size() + " argument(s), but " + args.size() + " were provided",
+                        call);
+                }
+
+                Map<String, Object> localScope = new LinkedHashMap<String, Object>();
+                for (int i = 0; i < params.size(); i++) {
+                    localScope.put(params.get(i),
+                        i < args.size() ? TypeChecker.deepCopy(args.get(i)) : new LinkedHashMap<String, Object>());
+                }
+
+                prepared = true;
+                // catchReturn=true + empty-object fallthrough: matches callUserFunction.
+                body = new StatementListStepper(interp, funcDef.getBody().statement(), localScope, true, true);
             }
 
-            return finish(new LinkedHashMap<String, Object>());
-        }
-
-        private StepResult finish(Object val) {
-            interp.getScopeStack().pop();
-            result = val;
-            done = true;
-            return StepResult.done(result);
+            StepResult r = body.step();
+            if (r.isDone()) {
+                result = body.getResult();
+                done = true;
+                return StepResult.done(result);
+            }
+            return r;
         }
 
         @Override
@@ -471,100 +820,57 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         @Override
         public Object getResult() { return result; }
         @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
+        public void setSendValue(Object value) {
+            if (body != null) body.setSendValue(value);
+        }
     }
 
-    /** Thread generator stepper: used for MULTI block child threads */
-    public static class ThreadGeneratorStepper implements Stepper {
-        private final ProperTeeInterpreter interp;
-        private final FunctionDef funcDef;
-        private final Map<String, Object> localScope;
-        private final List<ProperTeeParser.StatementContext> statements;
-        private int index = 0;
-        private Object result = null;
-        private boolean done = false;
-        private boolean yieldBoundary = false;
-        private boolean scopePushed = false;
-        private Object sendValue;
-        private boolean waitingForSpawn = false;
-
-        public ThreadGeneratorStepper(ProperTeeInterpreter interp, FunctionDef funcDef,
-                                       Map<String, Object> localScope) {
-            this.interp = interp;
-            this.funcDef = funcDef;
-            this.localScope = localScope;
-            this.statements = funcDef.getBody().statement();
+    /**
+     * Dispatch a statement to a suspendable sub-stepper, or return {@code null} to keep the eager
+     * {@code eval()} path. Only constructs that can cooperatively suspend in statement position are
+     * handled here; everything else stays eager.
+     */
+    Stepper createStatementStepper(ProperTeeParser.StatementContext stmt) {
+        if (stmt instanceof ProperTeeParser.IfStmtContext) {
+            return new IfStepper(this, ((ProperTeeParser.IfStmtContext) stmt).ifStatement());
         }
-
-        @Override
-        public StepResult step() {
-            if (done) return StepResult.done(result);
-
-            if (!scopePushed) {
-                interp.getScopeStack().push(localScope);
-                scopePushed = true;
+        if (stmt instanceof ProperTeeParser.IterStmtContext) {
+            ProperTeeParser.IterationStmtContext loop = ((ProperTeeParser.IterStmtContext) stmt).iterationStmt();
+            if (loop instanceof ProperTeeParser.ConditionLoopContext) {
+                return new ConditionLoopStepper(this, (ProperTeeParser.ConditionLoopContext) loop);
             }
-
-            if (waitingForSpawn && sendValue != null) {
-                processSpawnResults(interp, sendValue);
-                sendValue = null;
-                waitingForSpawn = false;
-                if (index < statements.size()) {
-                    yieldBoundary = true;
-                    return StepResult.BOUNDARY;
-                } else {
-                    return finish(new LinkedHashMap<String, Object>());
-                }
+            if (loop instanceof ProperTeeParser.ValueLoopContext) {
+                return new ValueLoopStepper(this, (ProperTeeParser.ValueLoopContext) loop);
             }
-
-            if (yieldBoundary) {
-                yieldBoundary = false;
-                return StepResult.BOUNDARY;
+            if (loop instanceof ProperTeeParser.KeyValueLoopContext) {
+                return new KeyValueLoopStepper(this, (ProperTeeParser.KeyValueLoopContext) loop);
             }
-
-            if (index < statements.size()) {
-                try {
-                    Object evalResult = interp.eval(statements.get(index));
-                    if (evalResult instanceof SchedulerCommand) {
-                        SchedulerCommand cmd = (SchedulerCommand) evalResult;
-                        result = null;
-                        index++;
-                        if (cmd.getType() == SchedulerCommand.CommandType.SPAWN_THREADS) {
-                            waitingForSpawn = true;
-                        }
-                        return StepResult.command(cmd);
-                    }
-                    if (interp.activeThread != null) interp.activeThread.asyncResultCache.clear();
-                    index++;
-                    if (index < statements.size()) {
-                        yieldBoundary = true;
-                        return StepResult.BOUNDARY;
-                    } else {
-                        return finish(new LinkedHashMap<String, Object>());
-                    }
-                } catch (ReturnException e) {
-                    return finish(e.getValue());
-                } catch (AsyncPendingException e) {
-                    return StepResult.command(SchedulerCommand.awaitAsync());
-                }
-            }
-
-            return finish(new LinkedHashMap<String, Object>());
         }
-
-        private StepResult finish(Object val) {
-            interp.getScopeStack().pop();
-            result = val;
-            done = true;
-            return StepResult.done(result);
+        if (stmt instanceof ProperTeeParser.ExprStmtContext) {
+            ProperTeeParser.FunctionCallContext call = bareUserCall(((ProperTeeParser.ExprStmtContext) stmt).expression());
+            if (call != null) {
+                return new UserCallStepper(this, call);
+            }
         }
+        return null;
+    }
 
-        @Override
-        public boolean isDone() { return done; }
-        @Override
-        public Object getResult() { return result; }
-        @Override
-        public void setSendValue(Object value) { this.sendValue = value; }
+    /**
+     * If {@code expr} is exactly a bare call to a user-defined function (no surrounding operators,
+     * member access, etc.), return its {@link ProperTeeParser.FunctionCallContext}; otherwise null.
+     * Builtins and ignored functions are excluded so they keep the eager path (builtins take
+     * precedence over user functions there, and ignored functions must throw their access error).
+     */
+    private ProperTeeParser.FunctionCallContext bareUserCall(ProperTeeParser.ExpressionContext expr) {
+        if (!(expr instanceof ProperTeeParser.AtomExprContext)) return null;
+        ProperTeeParser.AtomContext atom = ((ProperTeeParser.AtomExprContext) expr).atom();
+        if (!(atom instanceof ProperTeeParser.FuncAtomContext)) return null;
+        ProperTeeParser.FunctionCallContext call = ((ProperTeeParser.FuncAtomContext) atom).functionCall();
+        String funcName = call.funcName.getText();
+        if (ignoredFunctions.contains(funcName)) return null;
+        if (builtins.has(funcName)) return null;
+        if (!userDefinedFunctions.containsKey(funcName)) return null;
+        return call;
     }
 
     // ============================================================
@@ -1760,7 +2066,8 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                         localScope.put(params.get(j), j < spawn.args.size() ? TypeChecker.deepCopy(spawn.args.get(j)) : new LinkedHashMap<String, Object>());
                     }
 
-                    Stepper threadStepper = new ThreadGeneratorStepper(this, funcDef, localScope);
+                    Stepper threadStepper = new StatementListStepper(
+                        this, funcDef.getBody().statement(), localScope, true);
                     specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
 
                 } else if (builtins.has(spawn.funcName)) {
