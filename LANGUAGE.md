@@ -1,4 +1,4 @@
-# ProperTee Language Specification v0.9.0
+# ProperTee Language Specification v1.0.0
 
 ## Overview
 
@@ -1121,6 +1121,12 @@ Common error conditions:
 ---
 
 ## Changelog
+
+### v1.0.0
+
+- **Cooperative statement-nesting (Strategy C).** `SLEEP` / `multi` spawning / async now suspend cooperatively when they appear in **statement position** inside `if`/`else` bodies, all three `loop` bodies, bare user-function-call statements (`foo()`), `multi` worker bodies, and any nesting of these — other workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime). Previously a nested `SLEEP` used a blocking `Thread.sleep` fallback that froze the scheduler.
+- **Remaining eager seams documented.** A `SLEEP` reached only through an *expression* (assignment RHS, operators, conditions, iterables, arguments), the `multi` setup phase, and `monitor` bodies still run eagerly; async stays cooperative everywhere but resumes via statement replay. These do not affect result correctness (except the async-replay side-effect caveat) — they cost concurrency. Closing them fully is the goal of the separate Java 21+ (virtual-thread) runtime.
+- **This is the final feature release of the frozen Java 7/8 line.** Subsequent work moves to the Java 21+ runtime; v1.0.0 receives critical fixes only.
 
 ### v0.9.0
 
