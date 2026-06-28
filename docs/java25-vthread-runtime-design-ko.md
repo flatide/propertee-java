@@ -1,11 +1,11 @@
-# ProperTee — Java 21+ Virtual-Thread 런타임 설계도 (Strategy B)
+# ProperTee — Java 25+ Virtual-Thread 런타임 설계도 (Strategy B)
 
-> 상태: 설계 초안 (검토용). 구현 전 합의용 문서.
+> 상태: 설계 초안 (검토용). 구현 전 합의용 문서. **베이스라인: Java 25 LTS** (§0.1).
 > 대상: TeeBox가 사용할 **별도 프로젝트**. 레거시 expression-evaluator 서버는 동결된 `propertee-java` v1.0.0(Java 7/8)을 계속 사용.
 
 ## 0. 목적과 범위
 
-**목표.** v1.0.0(Java 7/8, stepper 기반)에 남아 있는 eager seam을 근본적으로 제거한 **완전 협력형 런타임**을 만든다. virtual thread(Project Loom, Java 21 정식)를 사용해 "콜스택 어디서든 중단"을 달성한다.
+**목표.** v1.0.0(Java 7/8, stepper 기반)에 남아 있는 eager seam을 근본적으로 제거한 **완전 협력형 런타임**을 만든다. virtual thread(Project Loom, Java 21 정식)를 사용해 "콜스택 어디서든 중단"을 달성한다. 베이스라인은 **Java 25 LTS**(ScopedValue 정식 + vthread pinning 해소; STS는 회피 — §0.1).
 
 v1.0.0에 남아 있는 seam(이 런타임이 닫으려는 대상):
 | # | seam | 성격 |
@@ -15,24 +15,24 @@ v1.0.0에 남아 있는 seam(이 런타임이 닫으려는 대상):
 | 3 | expression-call 안 긴 loop의 fairness | 동시성 |
 | 4 | async statement-replay 선행 부작용 2회 실행 | **정확성** |
 
-**소비처.** TeeBox(독립 서버, JDK 21+ 자유). **비목표:** Java 7/8 호환(포기), 문법 변경(동일 유지), 1단계에서 진짜 병렬(§9 옵션으로 후술).
+**소비처.** TeeBox(독립 서버, JDK를 통제하므로 Java 25 LTS 요구 가능). **비목표:** Java 7/8 호환(포기), 문법 변경(동일 유지), 1단계에서 진짜 병렬(§9 옵션으로 후술).
 
-## 0.1 플랫폼 베이스라인 & preview API 결정 (구현 전 확정 필요)
+## 0.1 플랫폼 베이스라인 & preview API 결정 — **Java 25 LTS 기본**
 
-Loom 관련 API의 정식화 시점이 다르다 — 이걸 먼저 정해야 한다.
+Loom 관련 API는 정식화 시점이 제각각이라, 무엇이 stable인지부터 정확히 못박는다.
 
-| API | Java 21 | 정식화 |
+| API | 상태 (Java 25 기준) | 비고 |
 |---|---|---|
-| Virtual threads (`Thread.ofVirtual`, `newVirtualThreadPerTaskExecutor`) | **정식**(JEP 444) | — |
-| `StructuredTaskScope` | preview(JEP 453) | **Java 25**(JEP 505) |
-| `ScopedValue` | preview(JEP 446) | **Java 25**(JEP 506) |
+| Virtual threads (`Thread.ofVirtual`, `newVirtualThreadPerTaskExecutor`) | **정식**(JEP 444, Java 21) | + **JEP 491**(Java 24)로 `synchronized` 중 carrier **pinning 해소** |
+| `ScopedValue` | **정식**(JEP 506, Java 25) | 25부터 `--enable-preview` 불필요 ✅ |
+| `StructuredTaskScope` | **여전히 preview**(JEP 505 = *Fifth* Preview, Java 25; API가 `open()`/`Joiner`로 **재설계**) | 25에서도 `--enable-preview` 필요 ⚠️ |
 
-**Java 21을 정확히 타깃하면 STS/ScopedValue는 `--enable-preview`가 필요**하고, preview API는 마이너 릴리스마다 시그니처가 바뀔 수 있다(STS는 24에서 실제로 변경됨). 두 노선:
+> ⚠️ **검증 필수:** 위 STS 상태는 착수 전 **실제 JDK 25 빌드에서 확인**한다 — `StructuredTaskScope` 사용 코드를 `--enable-preview` 없이 `javac` → preview면 컴파일 에러. (이 문서의 이전 판이 "STS가 25에서 정식"이라 잘못 적었던 항목이다.)
 
-- **(A) 안정 API만, Java 21+ (권장 초기).** `Executors.newVirtualThreadPerTaskExecutor()` + **명시적 context 객체**(ScopedValue 대신)로 시작. `multi`는 executor에 fork + 직접 join 관리. preview 플래그 불필요, 가장 넓은 호환.
-- **(B) Java 25+ 베이스라인.** STS/ScopedValue 정식 버전 사용 → 코드가 더 idiomatic·구조적. preview 플래그 불필요(정식이므로). 단 베이스라인을 25로 올려야 함.
+**결정: Java 25 LTS를 기본 베이스라인으로 한다.** 근거 — TeeBox가 JDK를 통제하고, 25에서 **ScopedValue가 정식**이 되며 **vthread pinning도 24+에서 해소**된다. 단 **STS는 25에서도 preview이므로 의존하지 않는다.**
 
-> **권고:** **(A)로 시작**해 preview 의존을 피하고, STS/ScopedValue는 §4·§5에서 "동일 의미를 명시 context/직접 join으로 먼저 구현, 베이스라인을 25로 올릴 때 도입"하는 선택지로 둔다. spike 단계에서 어느 노선인지 먼저 확정한다.
+- **사용(전부 stable):** virtual threads(정식) + **ScopedValue(25 정식)** 로 per-thread context 구성.
+- **회피:** `StructuredTaskScope` — `multi`는 `Executors.newVirtualThreadPerTaskExecutor()` + **직접 fork/join·결과수집**으로 hand-roll(이미 현 `Scheduler`가 하는 일). STS가 정식화되면(26+ 예상) 그때 국소 교체. → **preview 의존 0** 유지.
 
 ## 1. 핵심 모델 — virtual thread + 단일 바톤(cooperative)
 
@@ -79,22 +79,20 @@ Coop.spawnMulti(specs, monitor)  // 자식 vthread 생성 → 부모는 join에�
 - 내장 blocking builtin(`SHELL`/`HTTP`/`FILE_*` 등)도 전부 `Coop.blocking` 경로로 호출. **바톤을 쥔 코드 경로에서 순수 Java blocking 호출(`Thread.sleep`, 동기 소켓 등)을 직접 부르는 일이 없도록** 코드 리뷰/정적 점검 룰을 둔다.
 - 가능하면 **pinning 회피**(외부 라이브러리의 `synchronized` blocking을 `ReentrantLock` 경로로) — 단 이는 부차적이며, **1차 안전선은 "바톤 반납"이다.**
 
-## 4. `multi` 구현 (노선 A/B에 따라)
+## 4. `multi` 구현 (STS 없이 hand-roll)
 
-의미는 동일 — 워커별 vthread, 부모는 join에서 **협력적으로 대기**(바톤 반납), 결과 수집·에러 전파·취소. 구현 수단만 §0.1 노선에 따라 갈린다:
+의미는 동일 — 워커별 vthread, 부모는 join에서 **협력적으로 대기**(바톤 반납), 결과 수집·에러 전파·취소.
 
-- **노선 A (안정, 초기 권장):** `newVirtualThreadPerTaskExecutor()`에 워커 fork + **스케줄러가 직접 join/결과수집/취소 관리**(`Future`/카운트다운). 현재 `Scheduler`의 자식 관리·`resultCollection` 라이브 갱신 로직을 그대로 가져와 재사용.
-- **노선 B (Java 25+):** `StructuredTaskScope`로 fork/join을 구조적으로 대체 → 에러 전파·취소·생명주기를 STS가 보장(코드 축소). 노선 A의 수동 관리 코드를 STS로 치환.
+- §0.1 결정대로 **STS는 쓰지 않는다**(25에서도 preview). `Executors.newVirtualThreadPerTaskExecutor()`에 워커를 fork하고, **스케줄러가 직접 join/결과수집/취소 관리**(`Future` 또는 카운트다운). 현재 `Scheduler`의 자식 관리·`resultCollection` 라이브 갱신 로직을 그대로 가져와 재사용 — STS가 해줄 일을 우리가 이미 갖고 있다.
+- STS가 정식화되면(26+ 예상) 이 부분만 **국소 교체** 가능하도록 `multi` 실행을 한 곳에 캡슐화한다.
 - **setup phase도 협력형**(콜스택 실행) → seam 2 해결. 중첩 `multi` setup의 `SLEEP`도 outer 워커를 안 막음.
 - **monitor:** 인터벌 타이머(스케줄러 책임)가 바톤 하에 monitor 블록을 잠깐 실행(read-only, 라이브 result 읽기). 동작 동일.
 - **purity/결과 포맷 불변:** 워커는 스냅샷 read만, global write 금지, 결과 `{status, ok, value}` 동일.
 
-## 5. per-thread 컨텍스트 (노선 A/B에 따라)
+## 5. per-thread 컨텍스트 = ScopedValue (Java 25 정식)
 
-각 vthread는 자신의 `ScopeStack`/글로벌 스냅샷을 보유한다(`activeThread` 라우팅 핵 제거). 단일 바톤이라 공유 인터프리터 가변 상태에 동시 접근이 없어 안전.
-
-- **노선 A:** **명시적 `ThreadContext` 객체**를 호출 체인에 전달하거나 `ThreadLocal`로 보관(안정 API). 현재 `ThreadContext`와 유사.
-- **노선 B (Java 25+):** `ScopedValue`로 보관 → 불변·구조적이라 ThreadLocal보다 깔끔, 누수 위험 없음.
+- 각 vthread는 자신의 `ScopeStack`/글로벌 스냅샷을 **`ScopedValue`** 로 보유(`activeThread` 라우팅 핵 제거). Java 25에서 ScopedValue가 정식이므로 preview 없이 사용 가능, 불변·구조적이라 ThreadLocal보다 누수 위험이 없다.
+- 단일 바톤이라 공유 인터프리터 가변 상태에 동시 접근이 없어 안전. (ScopedValue 도입 전 단계에선 명시 `ThreadContext` 전달/`ThreadLocal`로도 동일 의미 구현 가능.)
 
 ## 6. 결정론 & yield 지점 (fixture 재사용의 전제)
 
@@ -121,7 +119,7 @@ Coop.spawnMulti(specs, monitor)  // 자식 vthread 생성 → 부모는 join에�
 
 - **(최대 위험) 바톤 미반납 blocking.** 단일 바톤 모델에서 한 실행자가 바톤을 쥔 채 막히면 **cooperative scheduler 전체가 정지**한다. §1 불변식 + §3.1 host 계약으로 강제하는 것이 1차 안전선. 회귀 방지: "장시간 바톤 점유 감지"(watchdog: 바톤 보유 시간이 임계 초과 시 경고/로그) 도입 검토.
 - **vthread pinning**(`synchronized`/native): 위 위험과 별개의 *부차적* 이슈. 바톤을 이미 반납한 `Coop.blocking` 안에서의 pin은 한 vthread를 carrier에 묶을 뿐 전체를 막지 않는다. JFR `jdk.VirtualThreadPinned`로 모니터하고 가능하면 회피하되, **pinning 자체가 주 위험은 아니다.**
-- **kill/timeout:** vthread interrupt + (노선 B면 STS) timeout. 현재 TaskRunner kill 의미와 매핑.
+- **kill/timeout:** vthread interrupt + 직접 timeout 관리(STS 미사용). 현재 TaskRunner kill 의미와 매핑.
 - **fairness 무한 CPU 루프:** `Coop.yield()` 지점으로 완화하되 loop iteration limit 유지.
 - **진짜 병렬(옵션, 후속):** purity model상 워커 병렬 실행은 의미상 안전하나, 공유 인터프리터 상태를 thread-confined(ScopedValue/per-thread scope)로 만들어야 함. I/O 바운드인 TeeBox엔 매력적이나 **1단계 비목표** — 협력형 동치 확보 후 별도 단계로 평가.
 
@@ -134,7 +132,7 @@ Coop.spawnMulti(specs, monitor)  // 자식 vthread 생성 → 부모는 join에�
 
 구현 전 **spike**로 핵심 가정을 먼저 깬다(리뷰 권고 순서):
 
-0. **preview API 노선 확정** — §0.1의 (A) 안정 API / (B) Java 25+ 중 택1.
+0. **베이스라인 확인** — §0.1대로 Java 25 LTS. 실제 JDK 25에서 `StructuredTaskScope`의 preview 여부를 컴파일로 검증(여전히 preview면 hand-roll 유지).
 1. **Coop/scheduler 최소 프로토타입** — 바톤, READY/SLEEPING/BLOCKED/WAITING, wake timer, 결정론적 round-robin 핸드오프.
 2. **재귀 인터프리터에서 중단 확인** — `SLEEP`, `x = f()`, `a + f()`, `return f()` 가 콜스택 어디서든 협력적으로 중단되는지(타이밍 오버랩으로 입증).
 3. **`Coop.blocking`으로 async replay 제거 확인** — "async 직전 선행 부작용 1회만 실행" 검증.
@@ -142,10 +140,10 @@ Coop.spawnMulti(specs, monitor)  // 자식 vthread 생성 → 부모는 join에�
 
 spike가 통과하면 본 구현 단계로:
 
-- PA. JDK21 Gradle 골격(노선 확정 반영) + 문법/builtins/값모델 포팅 + 기존 `.tee/.expected` 반입
+- PA. **JDK 25** Gradle 골격(toolchain 25, preview 플래그 없음) + 문법/builtins/값모델 포팅 + 기존 `.tee/.expected` 반입
 - PB. 재귀 인터프리터(stepper 제거판)
 - PC. Coop 런타임(바톤, `sleep`, `yield`, `blocking`) + **host external `Coop.blocking` 계약(§3.1)**
-- PD. `multi`/monitor (노선 A: executor+직접관리 / 노선 B: STS)
+- PD. `multi`/monitor — vthread executor + 직접 fork/join·결과수집(STS 미사용; 정식화 시 국소 교체용으로 캡슐화)
 - PE. conformance(.expected 전체 통과, **결정론적 순서 고정**) + seam 타이밍 테스트 + async replay-제거 테스트
 - PF. 문서/릴리스(0.1.0부터)
 
