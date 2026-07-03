@@ -4,6 +4,7 @@ import com.flatide.runtime.AsyncPendingException;
 import com.flatide.runtime.ProperTeeError;
 import com.flatide.runtime.Result;
 import com.flatide.runtime.TypeChecker;
+import com.flatide.runtime.TeeNull;
 import com.flatide.scheduler.ThreadContext;
 import com.flatide.stepper.SchedulerCommand;
 import com.flatide.platform.PlatformProvider;
@@ -15,6 +16,7 @@ import com.flatide.task.TaskRunner;
 import com.flatide.task.UnsupportedTaskRunner;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
@@ -177,7 +179,8 @@ public class BuiltinFunctions {
                 if (a instanceof List) return ((List<?>) a).size();
                 if (a instanceof String) return ((String) a).length();
                 if (a instanceof Map) return ((Map<?, ?>) a).size();
-                return 0;
+                // Spec v0.7.0 (#7): non-collections are an error (was a silent 0 until v0.6.0).
+                throw new ProperTeeError("Runtime Error: LEN() requires a string, array, or object argument");
             }
         });
 
@@ -264,13 +267,15 @@ public class BuiltinFunctions {
                 if (!(first instanceof List)) throw new ProperTeeError("Runtime Error: SLICE() first argument must be an array");
                 if (!TypeChecker.isNumber(args.get(1))) throw new ProperTeeError("Runtime Error: SLICE() second argument must be a number");
                 List<Object> arr = (List<Object>) first;
-                int start = (int) TypeChecker.toDouble(args.get(1)) - 1; // 1-based to 0-based
+                // Spec v0.7.0 (#6): the 3rd argument is a COUNT (clamped), unified with
+                // SUBSTRING/READ_LINES. (Until v0.6.0 it was in practice a 1-based inclusive end.)
+                int from = Math.min(Math.max((int) TypeChecker.toDouble(args.get(1)) - 1, 0), arr.size());
+                int to = arr.size();
                 if (args.size() > 2) {
                     if (!TypeChecker.isNumber(args.get(2))) throw new ProperTeeError("Runtime Error: SLICE() third argument must be a number");
-                    int end = (int) TypeChecker.toDouble(args.get(2));
-                    return new ArrayList<Object>(arr.subList(Math.max(0, start), Math.min(arr.size(), end)));
+                    to = Math.min(Math.max(from + (int) TypeChecker.toDouble(args.get(2)), from), arr.size());
                 }
-                return new ArrayList<Object>(arr.subList(Math.max(0, start), arr.size()));
+                return new ArrayList<Object>(arr.subList(from, to));
             }
         });
 
@@ -490,11 +495,9 @@ public class BuiltinFunctions {
                 if (args.isEmpty()) {
                     return rng.nextDouble();
                 } else if (args.size() == 1) {
-                    if (!TypeChecker.isNumber(args.get(0)))
-                        throw new ProperTeeError("Runtime Error: RANDOM() argument must be a number");
-                    int max = (int) TypeChecker.toDouble(args.get(0));
-                    if (max <= 0) throw new ProperTeeError("Runtime Error: RANDOM() max must be positive");
-                    return rng.nextInt(max);
+                    // Spec v0.7.0 (#5): the single-argument form (0 .. max-1) was REMOVED — its
+                    // bounds convention clashed with the inclusive two-argument form.
+                    throw new ProperTeeError("Runtime Error: RANDOM() requires zero or two arguments");
                 } else {
                     if (!TypeChecker.isNumber(args.get(0)) || !TypeChecker.isNumber(args.get(1)))
                         throw new ProperTeeError("Runtime Error: RANDOM() arguments must be numbers");
@@ -697,7 +700,10 @@ public class BuiltinFunctions {
         functions.put("JSON_FORMAT", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
-                return new Gson().toJson(properTeeToJson(args.get(0)));
+                // serializeNulls: object members holding the null value must be emitted
+                // (spec v0.8.0 #4 — lossless round-trip); default Gson drops them.
+                return new GsonBuilder().serializeNulls().create()
+                        .toJson(properTeeToJson(args.get(0)));
             }
         });
 
@@ -1007,7 +1013,7 @@ public class BuiltinFunctions {
     private static String coerceBody(Object body) {
         if (body == null) return null;
         if (body instanceof String) return (String) body;
-        return new Gson().toJson(properTeeToJson(body));
+        return new GsonBuilder().serializeNulls().create().toJson(properTeeToJson(body));
     }
 
     /** Extract a {@code timeout} (ms) from an options map; 0 if absent/invalid. */
@@ -1355,8 +1361,9 @@ public class BuiltinFunctions {
     // --- JSON conversion helpers ---
 
     private static Object jsonToProperTee(JsonElement element) {
+        // spec v0.8.0 (#4): JSON null is preserved (was normalized to {} until spec v0.7.0)
         if (element == null || element.isJsonNull()) {
-            return new LinkedHashMap<String, Object>();
+            return TeeNull.NULL;
         }
         if (element.isJsonPrimitive()) {
             JsonPrimitive prim = element.getAsJsonPrimitive();
@@ -1386,6 +1393,7 @@ public class BuiltinFunctions {
     @SuppressWarnings("unchecked")
     private static JsonElement properTeeToJson(Object value) {
         if (value == null) return JsonNull.INSTANCE;
+        if (value == TeeNull.NULL) return JsonNull.INSTANCE;   // spec v0.8.0 (#4)
         if (value instanceof Boolean) return new JsonPrimitive((Boolean) value);
         if (value instanceof Integer) return new JsonPrimitive((Integer) value);
         if (value instanceof Double) {

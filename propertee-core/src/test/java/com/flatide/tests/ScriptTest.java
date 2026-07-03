@@ -102,7 +102,16 @@ public class ScriptTest {
             "83_type_env",
             "84_json",
             "85_file_io",
-            "86_props_object"
+            "86_props_object",
+            // spec v0.7.0 breaking batch (ProperTee issues #1/#2/#5/#6/#7)
+            "87_short_circuit", "88_error_condition_not_boolean",
+            "89_error_loop_condition_not_boolean", "90_slice_count",
+            "91_error_random_single_arg", "92_error_len_non_collection",
+            // spec v0.8.0: first-class null literal (ProperTee issue #4)
+            "93_null_literal", "94_json_null_roundtrip",
+            "95_error_null_condition", "96_error_null_member",
+            // spec v0.9.0: elseif (ProperTee issue #3)
+            "97_elseif", "98_error_elseif_condition"
         };
 
         for (String name : testNames) {

@@ -26,7 +26,9 @@ lvalue
 block : statement* ;
 
 ifStatement
-    : K_IF condition=expression K_THEN thenBody=block (K_ELSE elseBody=block)? K_END
+    : K_IF condition=expression K_THEN thenBody=block
+      (K_ELSEIF elseifConds+=expression K_THEN elseifBodies+=block)*
+      (K_ELSE elseBody=block)? K_END
     ;
 
 functionDef
@@ -91,6 +93,7 @@ atom
     | INTEGER                # IntegerAtom
     | STRING                 # StringAtom
     | (K_TRUE | K_FALSE)     # BooleanAtom
+    | K_NULL                 # NullAtom
     | objectLiteral          # ObjectAtom
     | arrayLiteral           # ArrayAtom
     | '(' expression ')'     # ParenAtom
@@ -124,6 +127,7 @@ comparisonOp : '>' | '<' | '==' | '>=' | '<=' | '!=' ;
 
 K_IF        : 'if';
 K_THEN      : 'then';
+K_ELSEIF    : 'elseif';
 K_ELSE      : 'else';
 K_END       : 'end';
 K_LOOP      : 'loop';
@@ -139,6 +143,7 @@ K_AND       : 'and';
 K_OR        : 'or';
 K_TRUE      : 'true';
 K_FALSE     : 'false';
+K_NULL      : 'null';
 K_INFINITE  : 'infinite';
 K_MULTI     : 'multi';
 K_MONITOR   : 'monitor';
