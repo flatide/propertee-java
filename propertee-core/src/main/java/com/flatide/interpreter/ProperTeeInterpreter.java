@@ -453,6 +453,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         private final ProperTeeParser.IfStatementContext ctx;
         private Stepper body; // chosen branch (null until evaluated, or if no branch taken)
         private boolean evaluated = false;
+        private int armIndex = 0; // which condition is being evaluated (0 = if, 1.. = elseif)
         private Object result = null;
         private boolean done = false;
 
@@ -467,18 +468,27 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
             if (!evaluated) {
                 interp.checkKeywordAllowed("if", ctx);
-                Object condition;
-                try {
-                    condition = interp.eval(ctx.condition);
-                } catch (AsyncPendingException e) {
-                    // Async in the condition: retry on resume (evaluated stays false).
-                    return StepResult.command(SchedulerCommand.awaitAsync());
+                // Arms: index 0 = the if condition, 1..n = elseif conditions (spec v0.9.0 #3).
+                // Each arm's condition is evaluated at most once; on async, armIndex is unchanged
+                // so THAT condition is retried on resume (the documented eager seam).
+                ProperTeeParser.BlockContext branch = null;
+                while (armIndex <= ctx.elseifConds.size()) {
+                    org.antlr.v4.runtime.ParserRuleContext condExpr = armIndex == 0
+                            ? ctx.condition : ctx.elseifConds.get(armIndex - 1);
+                    Object condition;
+                    try {
+                        condition = interp.eval(condExpr);
+                    } catch (AsyncPendingException e) {
+                        return StepResult.command(SchedulerCommand.awaitAsync());
+                    }
+                    if (interp.requireCondition(condition, condExpr)) {
+                        branch = armIndex == 0 ? ctx.thenBody : ctx.elseifBodies.get(armIndex - 1);
+                        break;
+                    }
+                    armIndex++;
                 }
                 evaluated = true;
-                ProperTeeParser.BlockContext branch = null;
-                if (TypeChecker.isTruthy(condition)) {
-                    branch = ctx.thenBody;
-                } else if (ctx.elseBody != null) {
+                if (branch == null && ctx.elseBody != null) {
                     branch = ctx.elseBody;
                 }
                 if (branch == null) {
@@ -622,7 +632,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         @Override protected org.antlr.v4.runtime.ParserRuleContext ctx() { return ctx; }
         @Override protected String infiniteHint() { return "loop condition infinite do"; }
-        @Override protected boolean advance() { return TypeChecker.isTruthy(interp.eval(ctx.expression())); }
+        @Override protected boolean advance() { return interp.requireCondition(interp.eval(ctx.expression()), ctx.expression()); }
         @Override protected void bindCurrent() { /* no loop variable */ }
     }
 
@@ -1038,17 +1048,32 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     // --- If statement ---
 
+    /**
+     * Spec v0.7.0 (#1): {@code if}/{@code loop} conditions must be boolean — any other type is a
+     * runtime error anchored at the condition expression (there is no truthiness coercion).
+     */
+    boolean requireCondition(Object value, org.antlr.v4.runtime.ParserRuleContext exprCtx) {
+        if (value instanceof Boolean) return (Boolean) value;
+        throw createError("Condition requires a boolean value. Got " + TypeChecker.typeOf(value), exprCtx);
+    }
+
     @Override
     public Object visitIfStatement(ProperTeeParser.IfStatementContext ctx) {
         checkKeywordAllowed("if", ctx);
-        Object condition = eval(ctx.condition);
 
-        if (TypeChecker.isTruthy(condition)) {
+        if (requireCondition(eval(ctx.condition), ctx.condition)) {
             if (ctx.thenBody != null) {
                 return evalBlock(ctx.thenBody);
             }
             return null;
-        } else if (ctx.elseBody != null) {
+        }
+        // spec v0.9.0 (#3): elseif arms — first true condition wins; later conditions unevaluated
+        for (int n = 0; n < ctx.elseifConds.size(); n++) {
+            if (requireCondition(eval(ctx.elseifConds.get(n)), ctx.elseifConds.get(n))) {
+                return evalBlock(ctx.elseifBodies.get(n));
+            }
+        }
+        if (ctx.elseBody != null) {
             return evalBlock(ctx.elseBody);
         }
         return null;
@@ -1099,7 +1124,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         try {
             Object condition = eval(ctx.expression());
-            while (TypeChecker.isTruthy(condition)) {
+            while (requireCondition(condition, ctx.expression())) {
                 if (++iterations > limit) {
                     if ("warn".equals(iterationLimitBehavior)) {
                         stderr.print(new Object[]{"Warning: Loop exceeded maximum iterations (" + limit + "), stopping loop"});
@@ -1538,6 +1563,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @SuppressWarnings("unchecked")
     public Object getProperty(Object target, Object key, org.antlr.v4.runtime.ParserRuleContext ctx) {
+        // spec v0.8.0 (#4): member access on the null value fails like a missing property
+        if (target == TeeNull.NULL) {
+            if (ctx != null) throw createError("Property '" + key + "' does not exist", ctx);
+            throw new ProperTeeError("Runtime Error: Property '" + key + "' does not exist");
+        }
         if (target instanceof Map) {
             Map<String, Object> map = (Map<String, Object>) target;
             String strKey = String.valueOf(key);
@@ -1579,6 +1609,13 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
         if (ctx != null) throw createError("Cannot access property '" + key + "' on " + TypeChecker.typeOf(target), ctx);
         throw new ProperTeeError("Runtime Error: Cannot access property '" + key + "' on " + TypeChecker.typeOf(target));
+    }
+
+    // --- Null literal (spec v0.8.0 #4) ---
+
+    @Override
+    public Object visitNullAtom(ProperTeeParser.NullAtomContext ctx) {
+        return TeeNull.NULL;
     }
 
     // --- Access visitors ---
@@ -1732,26 +1769,28 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return a.equals(b);
     }
 
+    /**
+     * Spec v0.7.0 (#2): {@code and}/{@code or} short-circuit left to right — the right operand is
+     * not evaluated (side effects included) when the left side decides, and operands are
+     * type-checked only when actually evaluated (the error names only the evaluated operand).
+     */
+    private boolean logicalOperand(String name, ProperTeeParser.ExpressionContext expr,
+                                   org.antlr.v4.runtime.ParserRuleContext ctx) {
+        Object v = eval(expr);
+        if (v instanceof Boolean) return (Boolean) v;
+        throw createError("Logical " + name + " requires boolean operands. Got " + TypeChecker.typeOf(v), ctx);
+    }
+
     @Override
     public Object visitAndExpr(ProperTeeParser.AndExprContext ctx) {
-        Object left = eval(ctx.expression(0));
-        Object right = eval(ctx.expression(1));
-        if (!TypeChecker.isBoolean(left) || !TypeChecker.isBoolean(right)) {
-            throw createError("Logical AND requires boolean operands. Got " +
-                TypeChecker.typeOf(left) + " and " + TypeChecker.typeOf(right), ctx);
-        }
-        return (Boolean) left && (Boolean) right;
+        if (!logicalOperand("AND", ctx.expression(0), ctx)) return false;
+        return logicalOperand("AND", ctx.expression(1), ctx);
     }
 
     @Override
     public Object visitOrExpr(ProperTeeParser.OrExprContext ctx) {
-        Object left = eval(ctx.expression(0));
-        Object right = eval(ctx.expression(1));
-        if (!TypeChecker.isBoolean(left) || !TypeChecker.isBoolean(right)) {
-            throw createError("Logical OR requires boolean operands. Got " +
-                TypeChecker.typeOf(left) + " or " + TypeChecker.typeOf(right), ctx);
-        }
-        return (Boolean) left || (Boolean) right;
+        if (logicalOperand("OR", ctx.expression(0), ctx)) return true;
+        return logicalOperand("OR", ctx.expression(1), ctx);
     }
 
     // --- Function call ---

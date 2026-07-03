@@ -1,12 +1,12 @@
-# ProperTee Language Specification v1.0.0
+# ProperTee Language Specification v0.9.0
 
 ## Overview
 
-ProperTee is a small, safe scripting language designed for embedding in host applications. It features cooperative multithreading with a thread purity model — threads cannot mutate shared state, eliminating data races by design. There are no locks, no shared mutable state, and no null.
+ProperTee is a small, safe scripting language designed for embedding in host applications. It features cooperative multithreading with a thread purity model — threads cannot mutate shared state, eliminating data races by design. There are no locks, no shared mutable state, and no implicit null.
 
 ## Values and Types
 
-ProperTee has six types:
+ProperTee has seven types:
 
 | Type | Examples | Notes |
 |---|---|---|
@@ -16,8 +16,15 @@ ProperTee has six types:
 | boolean | `true`, `false` | |
 | array | `[1, 2, 3]`, `[]` | Ordered, 1-based indexing, heterogeneous |
 | object | `{"name": "Alice", "age": 30}`, `{}` | Ordered key-value pairs, string keys |
+| null | `null` | JSON's explicit "no value" — data, not a language mechanism |
 
-There is **no null**. The empty object `{}` serves as the "no value" sentinel throughout the language.
+There is **no implicit null**. The language itself never produces `null`: a missing argument defaults to `{}`, a function without a `return` returns `{}`, and no operation quietly yields `null`. The empty object `{}` remains the language's "no value" sentinel. `null` exists so that JSON — where `null` is a standard, meaningful value — round-trips losslessly: it enters a program only through the `null` literal or through data (`JSON_PARSE`, host-injected values), and it stays inert wherever it lands:
+
+- `TYPE_OF(null)` → `"null"`; it displays and JSON-formats as `null` (unquoted).
+- Equality works: `null == null` is `true`, `null == {}` is `false`, `null == 0` is `false`.
+- Everything else is a runtime error — `null` in a condition (`Condition requires a boolean value. Got null`), in arithmetic or logic, or member access on it. There is no null propagation: misuse fails loudly at the point of use.
+
+Scripts that don't touch JSON `null` never see it; check for it explicitly (`if x == null then`) at data boundaries.
 
 ### Number Representation
 
@@ -28,12 +35,13 @@ There is **no null**. The empty object `{}` serves as the "no value" sentinel th
 
 ### Truthiness
 
-Used in `if` conditions and `loop` conditions:
+`if` conditions and `loop` conditions require a **boolean** value:
 
-- **Truthy:** `true` only
-- **Falsy:** everything else — including `false`, `0`, `""`, `[]`, `{}`
+- `true` — take the branch / continue the loop
+- `false` — skip the branch / stop the loop
+- **Any other type is a runtime error:** `Condition requires a boolean value`
 
-Note: Conditions must use explicit boolean comparisons (e.g., `if x == true then` or `if x != false then`).
+There is no implicit coercion — `0`, `""`, `[]`, `{}` are not "falsy", they are type errors in a condition, matching the strictness of the logical operators. (Until spec v0.6.0, non-booleans in conditions were silently falsy; spec v0.7.0 made them loud — see the changelog migration note.)
 
 ## Variables
 
@@ -126,7 +134,7 @@ Division by zero is a runtime error.
 | `>=` | greater or equal | number >= number |
 | `<=` | less or equal | number <= number |
 
-Equality (`==`, `!=`) works across all types. Values are compared by content, not identity — `{} == {}` is `true`. Relational operators (`>`, `<`, `>=`, `<=`) require both operands to be numbers.
+Equality (`==`, `!=`) works across all types. Values are compared by content, not identity — `{} == {}` is `true`. `null` equals only itself: `null == null` is `true`; against any other value (including `{}`) it is `false`. Relational operators (`>`, `<`, `>=`, `<=`) require both operands to be numbers.
 
 ### Logical
 
@@ -136,7 +144,17 @@ Equality (`==`, `!=`) works across all types. Values are compared by content, no
 | `or` | logical OR | boolean or boolean |
 | `not` | logical NOT | not boolean |
 
-All logical operators **require boolean operands**. Using a number or string with `and`/`or` is a runtime error. Both sides are always evaluated (no short-circuit).
+All logical operators **require boolean operands**. Using a number or string with `and`/`or` is a runtime error.
+
+Evaluation **short-circuits** left to right: `false and X` and `true or X` do not evaluate `X` at all — side effects included — and an operand is type-checked only when it is evaluated. This enables the presence-guard idiom:
+
+```
+if HAS_KEY(obj, "k") and obj.k == 1 then   // obj.k is never touched when "k" is absent
+    ...
+end
+```
+
+(Until spec v0.6.0 both sides were always evaluated.)
 
 ### Precedence (lowest to highest)
 
@@ -149,6 +167,17 @@ All logical operators **require boolean operands**. Using a number or string wit
 7. `.` (member access)
 
 Parentheses `()` override precedence.
+
+> **⚠️ `not` binds tighter than comparison** (as in Lua): `not a == b` parses as `(not a) == b`, **not** `not (a == b)`. When `a` is not a boolean this fails loudly (`not` requires a boolean), and when both sides are booleans the two readings coincidentally agree — but when `a` is a boolean and `b` is not, the expression silently always yields `false`, because equality across types is legal and a boolean never equals a non-boolean:
+>
+> ```
+> status = true
+> if not status == "done" then    // (not status) == "done" → false, for ANY status
+>     PRINT("never runs")
+> end
+> ```
+>
+> For inequality, write `a != b` (preferred) or `not (a == b)`.
 
 ## Strings
 
@@ -291,7 +320,7 @@ data.users.2.name    // "Bob"
 
 ## Control Flow
 
-### If / Else
+### If / Elseif / Else
 
 ```
 if condition then
@@ -303,11 +332,23 @@ if condition then
 else
     // statements
 end
+
+if condition then
+    // statements
+elseif condition then
+    // statements
+elseif condition then
+    // statements
+else
+    // statements
+end
 ```
+
+Conditions are checked top to bottom; the first `true` arm runs and everything after it — later conditions included — is skipped (an `elseif` condition is only evaluated, and only type-checked, when reached). The optional `else` arm runs when no condition matched. Each evaluated condition must be a boolean (see Truthiness). One `end` closes the whole chain — `elseif` was added in spec v0.9.0; previously multi-way branches had to nest `else if ... end` with stacked `end`s (that form still works).
 
 ### Loops
 
-**Condition loop** — repeats while condition is truthy:
+**Condition loop** — repeats while the condition is `true` (a non-boolean condition is a runtime error, as in `if`):
 
 ```
 i = 0
@@ -679,7 +720,7 @@ end
 
 Only meaningful inside functions running within a `multi` block.
 
-> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` (and spawning / async) works whenever it appears as a **statement** inside an `if`/`else` body, a `loop` body, a bare function-call statement (`worker()`), a `multi` worker body, or any nesting of these — other `multi` workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime).
+> **Java runtime limitation (current).** Cooperative, non-blocking `SLEEP` (and spawning / async) works whenever it appears as a **statement** inside an `if`/`elseif`/`else` body, a `loop` body, a bare function-call statement (`worker()`), a `multi` worker body, or any nesting of these — other `multi` workers and `monitor` ticks keep advancing during the wait. Loops also yield between iterations, so workers interleave per-iteration (matching the propertee-js runtime).
 >
 > A few cases still run eagerly. They do **not** change results (timing and values stay correct) — they cost concurrency: while the eager region runs, other `multi` workers and `monitor` ticks pause.
 >
@@ -725,7 +766,7 @@ All built-in function names are UPPERCASE.
 
 | Function | Description |
 |---|---|
-| `TYPE_OF(v)` | Returns type name: `"number"`, `"string"`, `"boolean"`, `"array"`, `"object"` |
+| `TYPE_OF(v)` | Returns type name: `"number"`, `"string"`, `"boolean"`, `"array"`, `"object"`, `"null"` |
 
 ### String Functions
 
@@ -782,8 +823,8 @@ All built-in function names are UPPERCASE.
 
 | Function | Description |
 |---|---|
-| `JSON_PARSE(s)` | Parse JSON string. Returns Result: `ok` with parsed value, `error` on invalid JSON. JSON `null` becomes `{}`. |
-| `JSON_FORMAT(v)` | Convert any value to JSON string. |
+| `JSON_PARSE(s)` | Parse JSON string. Returns Result: `ok` with parsed value, `error` on invalid JSON. JSON `null` is preserved as `null` (was normalized to `{}` until spec v0.7.0). |
+| `JSON_FORMAT(v)` | Convert any value to JSON string. `null` serializes as `null`, so `JSON_PARSE`/`JSON_FORMAT` round-trip losslessly. |
 
 ### File I/O
 
@@ -1033,7 +1074,7 @@ if x == 10 then    // Runtime error: 'if' is not available in this environment
 end
 ```
 
-Keywords that can be hidden: `if`, `loop`, `function`, `multi`, `thread`, `debug`.
+Keywords that can be hidden: `if`, `loop`, `function`, `multi`, `thread`, `debug`. Hiding `if` covers the whole `if`/`elseif`/`else` statement.
 
 **Ignored functions** produce a runtime error when called:
 
@@ -1121,6 +1162,39 @@ Common error conditions:
 ---
 
 ## Changelog
+
+> Two version lineages interleave below: `spec vX` entries describe **language changes** (canonical in `flatide/ProperTee` LANGUAGE.md), while plain `vX` entries (v1.1.0, v1.0.0, v0.9.0, ...) are **propertee-java runtime releases**.
+
+### v1.1.0 — spec sync (implements spec v0.7.0 → v0.9.0)
+
+The spec-frozen era ends: this release implements the three spec batches below — strict boolean conditions, short-circuit `and`/`or`, `RANDOM`/`SLICE`/`LEN` cleanups (spec v0.7.0), first-class `null` (spec v0.8.0), and `elseif` (spec v0.9.0). **Language semantics only** — the stepper execution model, host API, and Java 7+ compatibility are unchanged. **Breaking for scripts** (see the spec entries' migration notes); the last pre-sync release remains available as `v1.0.0`.
+
+### spec v0.9.0 — `elseif`
+
+Lua-style `elseif` ([#3](https://github.com/flatide/ProperTee/issues/3)): multi-way branches no longer nest `else if ... end` with stacked `end`s — one chain, one `end`. Conditions are checked top to bottom; the first `true` arm wins and later conditions are not evaluated (and so not type-checked). The strict-boolean rule (spec v0.7.0) applies to each evaluated condition, and hiding the `if` keyword covers the whole chain.
+
+**Migration note:** `elseif` is now a reserved word — a script using it as a variable or function name must rename it. Existing nested `else if ... end` chains keep working unchanged.
+
+### spec v0.8.0 — first-class `null`
+
+`null` is now the seventh value type ([#4](https://github.com/flatide/ProperTee/issues/4)), added so JSON round-trips losslessly — JSON is central to ProperTee, and `null` is a standard, meaningful JSON value that previously could not be represented (`JSON_PARSE` collapsed it into `{}`, and `JSON_FORMAT` could never emit it).
+
+The design principle is **no implicit null**: the language itself never produces `null` (missing arguments and bare `return` still yield `{}`), so variables don't become nullable by accident — `null` enters a program only through the `null` literal or through data (`JSON_PARSE`, host-injected values). Once present it is inert data: equality and `TYPE_OF` (→ `"null"`) work; conditions, logic, arithmetic, and member access on `null` are runtime errors (the spec v0.7.0 strictness applies unchanged), so there is no null propagation.
+
+**Migration note:**
+
+- **`null` is now a reserved word.** A script using `null` as a variable or function name must rename it (previously it parsed as an ordinary identifier).
+- **`JSON_PARSE` no longer normalizes JSON `null` to `{}`.** Code that tested a parsed field with `== {}` to detect JSON `null` must now compare with `== null`. Fields that are genuinely `{}` in the JSON are unaffected.
+
+### spec v0.7.0 — breaking-change batch
+
+Five coordinated breaking changes ([#1](https://github.com/flatide/ProperTee/issues/1), [#2](https://github.com/flatide/ProperTee/issues/2), [#5](https://github.com/flatide/ProperTee/issues/5), [#6](https://github.com/flatide/ProperTee/issues/6), [#7](https://github.com/flatide/ProperTee/issues/7)) landed together so scripts migrate once. **Migration note:**
+
+- **Strict conditions** (#1): a non-boolean `if`/`loop` condition is now a runtime error (`Condition requires a boolean value`). Previously non-booleans were silently falsy — `if LEN(arr) then` never ran; it now fails loudly. Write explicit comparisons (`if LEN(arr) > 0 then`).
+- **Short-circuit `and`/`or`** (#2): evaluation is left to right and stops as soon as the result is decided — `false and X` / `true or X` no longer evaluate `X`, side effects included. This enables `if HAS_KEY(obj, "k") and obj.k == 1 then`. Operand type errors now report only the evaluated operand's type (`Got number`, not `Got number and number`).
+- **`RANDOM(max)` removed** (#5): the single-argument form (0 to max−1, exclusive) clashed with the inclusive two-argument form. Calling `RANDOM` with one argument is a runtime error; use `RANDOM(0, max - 1)` for the old meaning.
+- **`SLICE(arr, start, count)`** (#6): the third argument is now a **count**, unified with `SUBSTRING` and `READ_LINES`. The old third argument was in practice a 1-based *inclusive* end (the previous spec text "end is exclusive" described the 0-based internal bound), so migrate `SLICE(a, s, e)` → `SLICE(a, s, e - s + 1)`.
+- **Strict `LEN`** (#7): `LEN` on a number or boolean is now a runtime error (`LEN() requires a string, array, or object argument`) instead of silently returning `0`.
 
 ### v1.0.0
 

@@ -2,11 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is (v1.0.0)
+## What This Is (v1.1.0)
 
 ProperTee Java is a Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language. It uses ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** (replacing the JavaScript generator-based approach from [propertee-js](https://github.com/flatide/propertee-js)). Every statement visitor produces a Stepper object; a central scheduler round-robins between threads at statement boundaries.
 
-> **v1.0.0 is the frozen Java 7/8-compatible line.** Support scope: it is the stable runtime for the **legacy expression-evaluator server** (restricted grammar, expression-centric use). Policy: **security and critical bug fixes only — no new features.** Feature requests are directed to the modern runtime instead. Active development of the fully-cooperative runtime (Strategy B — virtual-thread coroutines, **Java 25 LTS** baseline) continues in a **separate project** consumed by TeeBox; the two lines are not kept in sync (one frozen, one active). Design: `docs/java25-vthread-runtime-design-ko.md`. See "Remaining eager seams" below for what Strategy B resolves.
+> **The Java 7/8-compatible line for the legacy expression-evaluator server** (restricted grammar, expression-centric use). Policy (revised 2026-07): **language-spec syncs + security/critical bug fixes; no runtime-architecture features.** The 1.x line tracks the canonical ProperTee spec — **v1.1.0 implements spec v0.7.0–v0.9.0** (strict boolean conditions, short-circuit `and`/`or`, `RANDOM`/`SLICE`/`LEN` cleanups, first-class `null` as `runtime.TeeNull`, `elseif`) with language semantics only; the stepper model, host API, and Java 7+ compatibility are untouched. Spec batches are breaking for scripts — the last pre-sync release stays available as the `v1.0.0` tag (the legacy server pins it until its scripts are migrated). Runtime-feature requests still go to the modern runtime. Active development of the fully-cooperative runtime (Strategy B — virtual-thread coroutines, **Java 25 LTS** baseline) continues in a **separate project** consumed by TeeBox; the two lines are not kept in sync (one frozen, one active). Design: `docs/java25-vthread-runtime-design-ko.md`. See "Remaining eager seams" below for what Strategy B resolves.
 
 ## Project Structure
 
@@ -73,7 +73,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./test_all.sh
 ```
 
-**Script tests:** 85 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-85, test 31 skipped). Each `NN_name.tee` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
+**Script tests:** 96 test pairs in `propertee-core/src/test/resources/tests/` (numbered 01-98; test 31 skipped; 87-98 added by the spec v0.7.0/v0.8.0/v0.9.0 syncs, matching the propertee2-java reference suite byte-for-byte). Each `NN_name.tee` file has a matching `.expected` file. Notable special cases: test 34 requires `-p` properties; test 41 uses `registerExternal`; test 71 uses `registerExternalAsync`; test 72 uses `SHELL()`; tests 73-74 test keyword/function ignore; tests 75-77 test range edge cases; tests 81-85 test new builtins (string matching, map extensions, type/env, JSON, file I/O). Test 83 and 85 require DefaultPlatformProvider injection.
 
 **Adding a new test:** Create `NN_name.tee` and `NN_name.expected` in `propertee-core/src/test/resources/tests/`, then add the test name string to the `testNames` array in `ScriptTest.java`. The test list is hardcoded — tests won't be discovered automatically.
 

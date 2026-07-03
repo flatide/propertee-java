@@ -6,6 +6,7 @@ public class TypeChecker {
 
     public static String typeOf(Object value) {
         if (value == null) return "null";
+        if (value instanceof TeeNull) return "null";   // spec v0.8.0 (#4)
         if (value instanceof Boolean) return "boolean";
         if (value instanceof Number) return "number";
         if (value instanceof String) return "string";
@@ -62,6 +63,7 @@ public class TypeChecker {
     /** Format a value for PRINT output, matching JS behavior */
     public static String formatValue(Object value) {
         if (value == null) return "null";
+        if (value instanceof TeeNull) return "null";   // spec v0.8.0 (#4): unquoted
         if (value instanceof Boolean) return value.toString();
         if (value instanceof Integer) return value.toString();
         if (value instanceof Double) {
@@ -116,6 +118,7 @@ public class TypeChecker {
     /** Format a value as it would appear inside JSON (strings get quotes) */
     public static String formatJsonValue(Object value) {
         if (value == null) return "null";
+        if (value instanceof TeeNull) return "null";   // spec v0.8.0 (#4): unquoted
         if (value instanceof String) return "'" + value + "'";
         if (value instanceof Boolean) return value.toString();
         if (value instanceof Integer) return value.toString();
@@ -135,6 +138,7 @@ public class TypeChecker {
     /** Format for TO_STRING - like JSON.stringify */
     public static String toStringValue(Object value) {
         if (value == null) return "null";
+        if (value instanceof TeeNull) return "null";   // spec v0.8.0 (#4)
         if (value instanceof Boolean) return value.toString();
         if (value instanceof Integer) return value.toString();
         if (value instanceof Double) {
@@ -178,6 +182,7 @@ public class TypeChecker {
 
     public static String jsonStringify(Object value) {
         if (value == null) return "null";
+        if (value instanceof TeeNull) return "null";   // spec v0.8.0 (#4)
         if (value instanceof String) return "\"" + value + "\"";
         if (value instanceof Boolean) return value.toString();
         if (value instanceof Integer) return value.toString();
