@@ -1,4 +1,4 @@
-# ProperTee for Java v1.1.0
+# ProperTee for Java v1.2.0
 
 A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
 
@@ -361,7 +361,7 @@ Properties passed into the interpreter follow the same mapping. Use Gson-compati
 ## Testing
 
 ```bash
-./gradlew test           # JUnit tests (96 script fixtures + unit tests)
+./gradlew test           # JUnit tests (101 script fixtures + unit tests)
 ./test_all.sh            # Integration tests against Java 8 JAR
 ./test_all.sh java7      # Integration tests against Java 7 JAR
 ./test_all.sh all        # Integration tests against both JARs

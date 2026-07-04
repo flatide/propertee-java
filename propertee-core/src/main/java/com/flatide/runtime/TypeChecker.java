@@ -215,7 +215,9 @@ public class TypeChecker {
         }
         if (value instanceof Map) {
             Map<String, Object> original = (Map<String, Object>) value;
-            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            // A genuine Result stays genuine across copies (spec v0.10.0 — origin propagation).
+            Map<String, Object> copy = (value instanceof TeeResult)
+                ? new TeeResult() : new LinkedHashMap<String, Object>();
             for (Map.Entry<String, Object> entry : original.entrySet()) {
                 copy.put(entry.getKey(), deepCopy(entry.getValue()));
             }

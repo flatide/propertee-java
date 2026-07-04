@@ -1817,6 +1817,23 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
         }
 
+        // FAIL/UNWRAP (spec v0.10.0) are dispatched here — not via the builtin table —
+        // so their errors carry the call site's line:col (builtin errors are positionless).
+        if (funcName.equals("FAIL")) {
+            if (args.size() != 1) throw createError("FAIL() requires a message argument", ctx);
+            throw createError(TypeChecker.toStringValue(args.get(0)), ctx);
+        }
+        if (funcName.equals("UNWRAP")) {
+            if (args.isEmpty() || args.size() > 2) throw createError("UNWRAP() requires (result, [message])", ctx);
+            Object res = args.get(0);
+            if (!(res instanceof TeeResult)) throw createError("UNWRAP() requires a Result", ctx);
+            TeeResult r = (TeeResult) res;
+            if (Boolean.TRUE.equals(r.get("ok"))) return r.get("value");
+            String valueText = TypeChecker.toStringValue(r.get("value"));
+            throw createError(args.size() > 1
+                    ? TypeChecker.toStringValue(args.get(1)) + ": " + valueText : valueText, ctx);
+        }
+
         // Built-in function
         if (builtins.has(funcName)) {
             String previousCallSiteKey = currentBuiltinCallSiteKey;

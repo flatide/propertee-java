@@ -14,26 +14,27 @@ public final class Result {
     private Result() {}
 
     public static Map<String, Object> running() {
-        Map<String, Object> r = new LinkedHashMap<String, Object>();
-        r.put("status", "running");
-        r.put("ok", false);
-        r.put("value", new LinkedHashMap<String, Object>());
-        return r;
+        return of("running", Boolean.FALSE, new LinkedHashMap<String, Object>());
     }
 
     public static Map<String, Object> ok(Object value) {
-        Map<String, Object> r = new LinkedHashMap<String, Object>();
-        r.put("status", "done");
-        r.put("ok", true);
-        r.put("value", value);
-        return r;
+        return of("done", Boolean.TRUE, value);
     }
 
     public static Map<String, Object> error(String message) {
-        Map<String, Object> r = new LinkedHashMap<String, Object>();
-        r.put("status", "error");
-        r.put("ok", false);
-        r.put("value", message);
+        return of("error", Boolean.FALSE, message);
+    }
+
+    /** {@code ERR(value)} (spec v0.10.0) — an error Result whose value may be any type (structured errors). */
+    public static Map<String, Object> errorValue(Object value) {
+        return of("error", Boolean.FALSE, value);
+    }
+
+    private static Map<String, Object> of(String status, Boolean ok, Object value) {
+        Map<String, Object> r = new TeeResult();   // genuine-Result origin brand (spec v0.10.0)
+        r.put("status", status);
+        r.put("ok", ok);
+        r.put("value", value);
         return r;
     }
 }

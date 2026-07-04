@@ -5,6 +5,7 @@ import com.flatide.runtime.ProperTeeError;
 import com.flatide.runtime.Result;
 import com.flatide.runtime.TypeChecker;
 import com.flatide.runtime.TeeNull;
+import com.flatide.runtime.TeeResult;
 import com.flatide.scheduler.ThreadContext;
 import com.flatide.stepper.SchedulerCommand;
 import com.flatide.platform.PlatformProvider;
@@ -204,6 +205,27 @@ public class BuiltinFunctions {
             @Override
             public Object call(List<Object> args) {
                 return TypeChecker.toStringValue(args.get(0));
+            }
+        });
+
+        // Spec v0.10.0: genuine-Result constructors + observer. (FAIL/UNWRAP live in the
+        // interpreter dispatch so their errors carry the call site's line:col.)
+        functions.put("OK", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return Result.ok(args.isEmpty() ? new LinkedHashMap<String, Object>() : args.get(0));
+            }
+        });
+        functions.put("ERR", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return Result.errorValue(args.isEmpty() ? new LinkedHashMap<String, Object>() : args.get(0));
+            }
+        });
+        functions.put("IS_RESULT", new BuiltinFunction() {
+            @Override
+            public Object call(List<Object> args) {
+                return Boolean.valueOf(!args.isEmpty() && args.get(0) instanceof TeeResult);
             }
         });
 
@@ -977,11 +999,8 @@ public class BuiltinFunctions {
     }
 
     private static Object httpEnvelope(boolean ok, Object value) {
-        Map<String, Object> r = new LinkedHashMap<String, Object>();
-        r.put("status", ok ? "done" : "error");
-        r.put("ok", Boolean.valueOf(ok));
-        r.put("value", value);
-        return r;
+        // Via the Result factory so HTTP results carry the genuine-Result brand (spec v0.10.0).
+        return ok ? Result.ok(value) : Result.errorValue(value);
     }
 
     /** Extract a {@code headers} object from an options map into a String->String map (values coerced). */
