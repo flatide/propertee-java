@@ -111,7 +111,10 @@ public class ScriptTest {
             "93_null_literal", "94_json_null_roundtrip",
             "95_error_null_condition", "96_error_null_member",
             // spec v0.9.0: elseif (ProperTee issue #3)
-            "97_elseif", "98_error_elseif_condition"
+            "97_elseif", "98_error_elseif_condition",
+            // spec v0.10.0: FAIL/UNWRAP/OK/ERR/IS_RESULT + genuine-Result brand
+            "99_fail", "100_unwrap", "101_result_brand",
+            "102_error_unwrap_nonresult", "103_fail_thread"
         };
 
         for (String name : testNames) {
