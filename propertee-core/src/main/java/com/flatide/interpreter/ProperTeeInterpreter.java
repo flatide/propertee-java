@@ -1817,6 +1817,13 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             }
         }
 
+        // User-defined function (spec v0.11.0: name resolution is host-blocked ->
+        // script-defined functions -> built-ins/externals, so a script function
+        // shadows any same-named built-in or external; was builtins-first before)
+        if (userDefinedFunctions.containsKey(funcName)) {
+            return callUserFunction(funcName, args, ctx);
+        }
+
         // FAIL/UNWRAP (spec v0.10.0) are dispatched here — not via the builtin table —
         // so their errors carry the call site's line:col (builtin errors are positionless).
         if (funcName.equals("FAIL")) {
@@ -1849,11 +1856,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             } finally {
                 currentBuiltinCallSiteKey = previousCallSiteKey;
             }
-        }
-
-        // User-defined function
-        if (userDefinedFunctions.containsKey(funcName)) {
-            return callUserFunction(funcName, args, ctx);
         }
 
         throw createError("Unknown function '" + funcName + "'", ctx);
