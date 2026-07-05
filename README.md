@@ -1,4 +1,4 @@
-# ProperTee for Java v1.5.0
+# ProperTee for Java v1.5.1
 
 A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
 

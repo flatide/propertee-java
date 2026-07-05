@@ -1253,6 +1253,10 @@ Common error conditions:
 
 > Two version lineages interleave below: `spec vX` entries describe **language changes** (canonical in `flatide/ProperTee` LANGUAGE.md), while plain `vX` entries (v1.1.0, v1.0.0, v0.9.0, ...) are **propertee-java runtime releases**.
 
+### v1.5.1 — fix: the ignore list now blocks user-function thread spawns
+
+The runtime backstop had a hole: the `multi` spawn-processing loop checked `ignoredFunctions` only in its builtin branch, so `setIgnoredFunctions({"foo"})` blocked `foo()` but let `multi do thread : foo() end` run a user-defined `foo` (a long-standing gap — the static validation pass of 1.5.0 did report it, but the runtime must too). The check now runs before any spawn dispatch, in the same order as normal calls. Regression-tested.
+
 ### v1.5.0 — static validation pass for host restrictions (ProperTee issue #9)
 
 Adds `ProperTeeInterpreter.validate(tree)` — an opt-in host API that scans the whole parse tree (dead branches included) and reports every hidden-keyword construct and ignored-function call with `line:col` and the runtime's message text, so a sandboxing host can reject a script before execution. No language change, no spec version bump; runtime enforcement is unchanged (backstop). Included in the maintenance line under the security exception (sandboxing defense-in-depth).

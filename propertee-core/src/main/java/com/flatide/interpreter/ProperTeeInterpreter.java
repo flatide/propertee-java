@@ -2164,6 +2164,13 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 SpawnSpec spawn = collectedSpawns.get(i);
                 resultKeyNames.add(spawn.resultKey);
 
+                // Check the function ignore list before ANY dispatch — same order as
+                // visitFunctionCall. Checking it only in the builtin branch let an ignored
+                // user function slip through `thread : foo()` (runtime backstop hole).
+                if (ignoredFunctions.contains(spawn.funcName)) {
+                    throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
+                }
+
                 if (userDefinedFunctions.containsKey(spawn.funcName)) {
                     FunctionDef funcDef = userDefinedFunctions.get(spawn.funcName);
                     List<String> params = funcDef.getParams();
@@ -2185,10 +2192,6 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                     specs.add(new SchedulerCommand.ThreadSpec(spawn.funcName + "-" + i, threadStepper, localScope));
 
                 } else if (builtins.has(spawn.funcName)) {
-                    // Check function ignore list
-                    if (ignoredFunctions.contains(spawn.funcName)) {
-                        throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
-                    }
                     // Built-in function: execute immediately and wrap result. If it returns a
                     // SchedulerCommand (e.g. SLEEP), yield that command to the scheduler so the worker
                     // actually sleeps, instead of treating the command object as the thread's result.
