@@ -1,4 +1,4 @@
-# ProperTee Language Specification v0.10.0
+# ProperTee Language Specification v0.11.0
 
 ## Overview
 
@@ -457,6 +457,16 @@ function factorial(n) do
     return n * factorial(n - 1)
 end
 ```
+
+### Name Resolution
+
+A function call `NAME(...)` resolves in this order (specified since spec v0.11.0):
+
+1. If the host has blocked `NAME` (ignored functions), the call is a runtime error: `'NAME' is not available in this environment`.
+2. A script-defined function named `NAME`.
+3. Built-in functions and host-registered external functions.
+
+A script-defined function therefore **shadows** any same-named built-in or external function — and a spec release adding new built-ins can never change what an existing script's calls resolve to. Within step 3, `FAIL` and `UNWRAP` cannot be replaced by host-registered externals (the built-ins win); an external registered under another catalog built-in's name replaces that built-in. Registering externals under the names `PRINT` or `SLEEP` is implementation-defined — avoid it. (Runtime note: this runtime's dispatch is ignored functions → script functions → `FAIL`/`UNWRAP` → the builtin table, which holds catalog built-ins, `PRINT`/`SLEEP`, and externals in one map — until 1.3.0 the builtin table was checked before script functions.)
 
 ## Variable Scope
 
@@ -1208,6 +1218,16 @@ Common error conditions:
 ## Changelog
 
 > Two version lineages interleave below: `spec vX` entries describe **language changes** (canonical in `flatide/ProperTee` LANGUAGE.md), while plain `vX` entries (v1.1.0, v1.0.0, v0.9.0, ...) are **propertee-java runtime releases**.
+
+### v1.3.0 — spec sync (implements spec v0.11.0)
+
+Implements spec v0.11.0 below: `visitFunctionCall` now resolves script-defined functions **before** the builtin table (was builtins-first since the beginning). **Behavior change** for scripts that define a function under a built-in name: the script's function now wins — including a script's own `OK`/`ERR`/`IS_RESULT`, which in 1.2.0 resolved to the spec v0.10.0 built-ins (the 1.2.0 runtime note below is superseded).
+
+### spec v0.11.0 — function-name resolution pinned
+
+A function call now resolves in a specified order — host-blocked check → script-defined functions → built-ins/externals (see [Name Resolution](#name-resolution)) — so a script-defined function shadows any same-named built-in or external in every runtime. Previously this was implementation-defined: the reference runtime already resolved script functions first, while this runtime and propertee-js resolved built-ins first (a script's own `OK`, `LEN`, ... silently resolved to the built-in here). Pinning script-functions-first also makes future built-in additions genuinely non-breaking.
+
+**Migration note:** a script that defines a function under a built-in name *and relied on the built-in winning* must rename that function. No grammar or keyword changes; existing fixtures are byte-identical.
 
 ### v1.2.0 — spec sync (implements spec v0.10.0)
 

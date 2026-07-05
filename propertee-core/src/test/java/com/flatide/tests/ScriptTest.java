@@ -114,7 +114,9 @@ public class ScriptTest {
             "97_elseif", "98_error_elseif_condition",
             // spec v0.10.0: FAIL/UNWRAP/OK/ERR/IS_RESULT + genuine-Result brand
             "99_fail", "100_unwrap", "101_result_brand",
-            "102_error_unwrap_nonresult", "103_fail_thread"
+            "102_error_unwrap_nonresult", "103_fail_thread",
+            // spec v0.11.0: script-defined functions shadow built-ins/externals
+            "104_user_function_shadowing"
         };
 
         for (String name : testNames) {
