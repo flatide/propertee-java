@@ -1167,6 +1167,8 @@ x = SHELL("echo hello")   // Runtime error: 'SHELL' is not available in this env
 
 Both built-in and external functions can be ignored. The check applies to normal function calls and to function calls inside multi block `thread` spawns.
 
+**Two enforcement points.** The restrictions above are enforced at **runtime**: the error is raised only when the forbidden construct is reached or the forbidden function is called, so a forbidden construct sitting in an untaken branch is not detected by running the script. For sandboxing, implementations additionally provide an **opt-in static validation pass** (a host API — `Engine.validate(source)` in the reference runtime, `interpreter.validate(tree)` in propertee-java, `visitor.validate(tree)` in propertee-js): it scans the whole parse tree — dead branches included — and returns one `line L:C: 'X' is not available in this environment` entry per hidden-keyword construct and ignored-function call, so a host can reject a script before executing it. The static pass is conservative and has no false negatives for these two restriction types; the runtime checks stay in place as a backstop. Default behavior is unchanged — hosts choose when to validate. (Runtime note: `ProperTeeInterpreter.validate(tree)`, added in 1.5.0.)
+
 ## Comments
 
 ```
@@ -1250,6 +1252,10 @@ Common error conditions:
 ## Changelog
 
 > Two version lineages interleave below: `spec vX` entries describe **language changes** (canonical in `flatide/ProperTee` LANGUAGE.md), while plain `vX` entries (v1.1.0, v1.0.0, v0.9.0, ...) are **propertee-java runtime releases**.
+
+### v1.5.0 — static validation pass for host restrictions (ProperTee issue #9)
+
+Adds `ProperTeeInterpreter.validate(tree)` — an opt-in host API that scans the whole parse tree (dead branches included) and reports every hidden-keyword construct and ignored-function call with `line:col` and the runtime's message text, so a sandboxing host can reject a script before execution. No language change, no spec version bump; runtime enforcement is unchanged (backstop). Included in the maintenance line under the security exception (sandboxing defense-in-depth).
 
 ### v1.4.0 — spec sync (implements spec v0.12.0)
 
