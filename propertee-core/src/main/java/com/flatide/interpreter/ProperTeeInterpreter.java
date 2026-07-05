@@ -1331,6 +1331,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
     public Object visitFunctionDef(ProperTeeParser.FunctionDefContext ctx) {
         checkKeywordAllowed("function", ctx);
         String funcName = ctx.funcName.getText();
+        // spec v0.12.0: the all-uppercase namespace is reserved for built-in/host functions
+        if (funcName.matches("[A-Z][A-Z0-9_]*")) {
+            throw createError("Cannot define function '" + funcName
+                    + "': all-uppercase names are reserved for built-in and host functions", ctx);
+        }
         List<String> params = new ArrayList<String>();
         if (ctx.parameterList() != null) {
             for (org.antlr.v4.runtime.tree.TerminalNode id : ctx.parameterList().ID()) {

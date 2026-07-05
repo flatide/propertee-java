@@ -115,8 +115,8 @@ public class ScriptTest {
             // spec v0.10.0: FAIL/UNWRAP/OK/ERR/IS_RESULT + genuine-Result brand
             "99_fail", "100_unwrap", "101_result_brand",
             "102_error_unwrap_nonresult", "103_fail_thread",
-            // spec v0.11.0: script-defined functions shadow built-ins/externals
-            "104_user_function_shadowing"
+            // spec v0.12.0: reserved all-uppercase namespace (104 retired with it)
+            "105_error_reserved_function_name", "106_function_name_case"
         };
 
         for (String name : testNames) {
