@@ -125,6 +125,57 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         }
     }
 
+    /**
+     * Opt-in <b>static validation pass</b> for the configured host restrictions (ProperTee issue #9).
+     * The runtime enforces {@link #setHiddenKeywords}/{@link #setIgnoredFunctions} only when a
+     * construct is reached, so a forbidden statement in an untaken branch goes undetected; this
+     * scans the whole parse tree — dead branches included — and returns one
+     * {@code "line L:C: 'X' is not available in this environment"} entry per hidden-keyword
+     * construct / ignored-function call (empty = clean). Runtime enforcement is unchanged
+     * (backstop). Security/defense-in-depth addition; no language or scheduling change.
+     */
+    public List<String> validate(ProperTeeParser.RootContext tree) {
+        List<String> out = new ArrayList<String>();
+        validateWalk(tree, out);
+        return out;
+    }
+
+    private void validateWalk(org.antlr.v4.runtime.tree.ParseTree t, List<String> out) {
+        if (t instanceof ProperTeeParser.IfStatementContext) {              // covers the elseif chain
+            validateKeyword("if", (ProperTeeParser.IfStatementContext) t, out);
+        } else if (t instanceof ProperTeeParser.IterationStmtContext) {     // all three loop forms
+            validateKeyword("loop", (ProperTeeParser.IterationStmtContext) t, out);
+        } else if (t instanceof ProperTeeParser.FunctionDefContext) {
+            validateKeyword("function", (ProperTeeParser.FunctionDefContext) t, out);
+        } else if (t instanceof ProperTeeParser.ParallelStmtContext) {
+            validateKeyword("multi", (ProperTeeParser.ParallelStmtContext) t, out);
+        } else if (t instanceof ProperTeeParser.SpawnStmtContext) {
+            validateKeyword("thread", (ProperTeeParser.SpawnStmtContext) t, out);
+        } else if (t instanceof ProperTeeParser.DebugStmtContext) {
+            validateKeyword("debug", (ProperTeeParser.DebugStmtContext) t, out);
+        } else if (t instanceof ProperTeeParser.FunctionCallContext) {
+            ProperTeeParser.FunctionCallContext c = (ProperTeeParser.FunctionCallContext) t;
+            if (ignoredFunctions.contains(c.funcName.getText())) {
+                validateReport(c.funcName.getText(), c.funcName, out);
+            }
+        }
+        // Always recurse — a report on a construct does not hide violations nested inside it.
+        for (int i = 0; i < t.getChildCount(); i++) {
+            validateWalk(t.getChild(i), out);
+        }
+    }
+
+    private void validateKeyword(String keyword, org.antlr.v4.runtime.ParserRuleContext ctx, List<String> out) {
+        if (hiddenKeywords.contains(keyword)) {
+            validateReport(keyword, ctx.getStart(), out);
+        }
+    }
+
+    private static void validateReport(String name, org.antlr.v4.runtime.Token at, List<String> out) {
+        out.add("line " + at.getLine() + ":" + at.getCharPositionInLine()
+                + ": '" + name + "' is not available in this environment");
+    }
+
     // --- Helper methods ---
 
     public String getLocation(org.antlr.v4.runtime.ParserRuleContext ctx) {
