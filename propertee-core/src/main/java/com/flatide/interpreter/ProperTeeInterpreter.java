@@ -1456,7 +1456,16 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitIntegerAtom(ProperTeeParser.IntegerAtomContext ctx) {
-        return Integer.parseInt(ctx.getText());
+        return parseIntLiteral(ctx.getText(), ctx);
+    }
+
+    /** Integer literals must fit the 32-bit range (spec v0.13.0); tokens are unsigned digits. */
+    private Integer parseIntLiteral(String token, org.antlr.v4.runtime.ParserRuleContext ctx) {
+        try {
+            return Integer.parseInt(token);
+        } catch (NumberFormatException tooBig) {
+            throw createError("Integer literal out of range: " + token, ctx);
+        }
     }
 
     @Override
@@ -1709,7 +1718,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
 
     @Override
     public Object visitArrayAccess(ProperTeeParser.ArrayAccessContext ctx) {
-        return Integer.parseInt(ctx.INTEGER().getText()); // 1-based; getProperty/setProperty convert for arrays
+        return parseIntLiteral(ctx.INTEGER().getText(), ctx); // 1-based; getProperty/setProperty convert for arrays
     }
 
     @Override
@@ -1730,6 +1739,11 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         Object value = eval(ctx.expression());
         if (!TypeChecker.isNumber(value)) {
             throw createError("Unary minus requires numeric operand. Got -" + TypeChecker.typeOf(value), ctx);
+        }
+        if (value instanceof Integer) {
+            // 32-bit envelope (spec v0.13.0): -MIN does not fit.
+            if ((Integer) value == Integer.MIN_VALUE) throw createError("Integer overflow", ctx);
+            return -(Integer) value;
         }
         return TypeChecker.boxNumber(-TypeChecker.toDouble(value));
     }
@@ -1754,6 +1768,10 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 TypeChecker.typeOf(left) + " " + op + " " + TypeChecker.typeOf(right), ctx);
         }
 
+        if ("*".equals(op) && left instanceof Integer && right instanceof Integer) {
+            return intArith((Integer) left, (Integer) right, '*', ctx);   // 32-bit envelope (spec v0.13.0)
+        }
+
         double l = TypeChecker.toDouble(left);
         double r = TypeChecker.toDouble(right);
 
@@ -1765,6 +1783,21 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         return null;
     }
 
+    /** Integer-integer +,-,* stay integers and must fit the 32-bit range (spec v0.13.0). */
+    private Object intArith(int l, int r, char op, org.antlr.v4.runtime.ParserRuleContext ctx) {
+        long result;
+        switch (op) {
+            case '+': result = (long) l + (long) r; break;
+            case '-': result = (long) l - (long) r; break;
+            case '*': result = (long) l * (long) r; break;
+            default: throw new IllegalStateException();
+        }
+        if (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) {
+            throw createError("Integer overflow", ctx);
+        }
+        return (int) result;
+    }
+
     @Override
     public Object visitAdditiveExpr(ProperTeeParser.AdditiveExprContext ctx) {
         Object left = eval(ctx.expression(0));
@@ -1772,6 +1805,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         String op = ctx.getChild(1).getText();
 
         if ("+".equals(op)) {
+            if (left instanceof Integer && right instanceof Integer) {
+                return intArith((Integer) left, (Integer) right, '+', ctx);   // 32-bit envelope (spec v0.13.0)
+            }
             if (TypeChecker.isNumber(left) && TypeChecker.isNumber(right)) {
                 return TypeChecker.boxNumber(TypeChecker.toDouble(left) + TypeChecker.toDouble(right));
             }
@@ -1785,6 +1821,9 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
             if (!TypeChecker.isNumber(left) || !TypeChecker.isNumber(right)) {
                 throw createError("Subtraction requires numeric operands. Got " +
                     TypeChecker.typeOf(left) + " - " + TypeChecker.typeOf(right), ctx);
+            }
+            if (left instanceof Integer && right instanceof Integer) {
+                return intArith((Integer) left, (Integer) right, '-', ctx);   // 32-bit envelope (spec v0.13.0)
             }
             return TypeChecker.boxNumber(TypeChecker.toDouble(left) - TypeChecker.toDouble(right));
         }
@@ -2165,10 +2204,36 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
                 resultKeyNames.add(spawn.resultKey);
 
                 // Check the function ignore list before ANY dispatch — same order as
-                // visitFunctionCall. Checking it only in the builtin branch let an ignored
-                // user function slip through `thread : foo()` (runtime backstop hole).
+                // visitFunctionCall. Spec v0.13.0: a blocked function reached via a thread spawn
+                // fails THAT worker only ([THREAD ERROR] + an error Result in the collection, run
+                // continues) — exactly like any other worker runtime error. The worker is spawned
+                // as a stepper that raises the error on its first slice, so the existing scheduler
+                // error path does the containment (previously this threw here, failing the whole run).
                 if (ignoredFunctions.contains(spawn.funcName)) {
-                    throw createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
+                    final ProperTeeError blocked =
+                        createError("'" + spawn.funcName + "' is not available in this environment", spawn.ctx);
+                    Stepper failingStepper = new Stepper() {
+                        @Override
+                        public StepResult step() {
+                            throw blocked;
+                        }
+
+                        @Override
+                        public boolean isDone() {
+                            return false;
+                        }
+
+                        @Override
+                        public Object getResult() {
+                            return null;
+                        }
+
+                        @Override
+                        public void setSendValue(Object value) {
+                        }
+                    };
+                    specs.add(new SchedulerCommand.ThreadSpec("blocked-" + spawn.funcName + "-" + i, failingStepper, null));
+                    continue;
                 }
 
                 if (userDefinedFunctions.containsKey(spawn.funcName)) {
@@ -2216,7 +2281,7 @@ public class ProperTeeInterpreter extends ProperTeeBaseVisitor<Object> {
         SchedulerCommand.MonitorSpec monitorSpec = null;
         if (ctx.monitorClause() != null) {
             ProperTeeParser.MonitorClauseContext mc = ctx.monitorClause();
-            int interval = Integer.parseInt(mc.INTEGER().getText());
+            int interval = parseIntLiteral(mc.INTEGER().getText(), mc);   // an INTEGER literal (32-bit rule)
             monitorSpec = new SchedulerCommand.MonitorSpec(interval, mc.block());
         }
 

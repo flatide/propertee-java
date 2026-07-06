@@ -1253,6 +1253,20 @@ Common error conditions:
 
 > Two version lineages interleave below: `spec vX` entries describe **language changes** (canonical in `flatide/ProperTee` LANGUAGE.md), while plain `vX` entries (v1.1.0, v1.0.0, v0.9.0, ...) are **propertee-java runtime releases**.
 
+### spec v0.13.0 — the edges pinned: integer envelope, spawn containment, dispatch names (v1.6.0)
+
+Grown from the v1.0-readiness review (ProperTee `docs/design-draft-v1.0-gate.md`): the corners the
+fixture suite never covered diverged across the runtimes, now specified. **Breaking in those
+corners only.** Integers are pinned to 32-bit signed — out-of-range integer literals
+(`Integer literal out of range: …`; this runtime previously leaked a raw
+`For input string` message) and overflowing `+`/`-`/`*`/unary `-` on integer operands
+(`Integer overflow`; previously silently promoted to scientific-notation decimals) are runtime
+errors; `FLOOR`/`CEIL`/`ROUND` stop promoting out-of-range results and `ABS(−2³¹)` errors; data
+conversion (`JSON_PARSE`/`TO_NUMBER`) still promotes to decimals. A blocked function reached via
+`thread` spawn now fails **that worker only** ([THREAD ERROR] + error Result — 1.5.1 briefly
+failed the whole run; worker containment matches every other worker error). Registering host
+functions named `PRINT`/`SLEEP`/`FAIL`/`UNWRAP` is a registration-time error. Fixtures 107–111.
+
 ### v1.5.1 — fix: the ignore list now blocks user-function thread spawns
 
 The runtime backstop had a hole: the `multi` spawn-processing loop checked `ignoredFunctions` only in its builtin branch, so `setIgnoredFunctions({"foo"})` blocked `foo()` but let `multi do thread : foo() end` run a user-defined `foo` (a long-standing gap — the static validation pass of 1.5.0 did report it, but the runtime must too). The check now runs before any spawn dispatch, in the same order as normal calls. Regression-tested.
