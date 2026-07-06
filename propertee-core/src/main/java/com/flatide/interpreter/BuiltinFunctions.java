@@ -148,28 +148,38 @@ public class BuiltinFunctions {
         functions.put("ABS", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
-                return TypeChecker.boxNumber(Math.abs(TypeChecker.toDouble(args.get(0))));
+                Object n = args.get(0);
+                if (n instanceof Integer) {
+                    // 32-bit envelope (spec v0.13.0): |MIN| does not fit.
+                    if ((Integer) n == Integer.MIN_VALUE) {
+                        throw new ProperTeeError("Runtime Error: Integer overflow");
+                    }
+                    return Math.abs((Integer) n);
+                }
+                return TypeChecker.boxNumber(Math.abs(TypeChecker.toDouble(n)));
             }
         });
 
+        // FLOOR/CEIL/ROUND produce an Integer; a result outside the 32-bit range is a loud
+        // error, never a silent promotion (spec v0.13.0).
         functions.put("FLOOR", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
-                return TypeChecker.boxNumber(Math.floor(TypeChecker.toDouble(args.get(0))));
+                return intResult(Math.floor(TypeChecker.toDouble(args.get(0))));
             }
         });
 
         functions.put("CEIL", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
-                return TypeChecker.boxNumber(Math.ceil(TypeChecker.toDouble(args.get(0))));
+                return intResult(Math.ceil(TypeChecker.toDouble(args.get(0))));
             }
         });
 
         functions.put("ROUND", new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
-                return TypeChecker.boxNumber(Math.round(TypeChecker.toDouble(args.get(0))));
+                return intResult(Math.round(TypeChecker.toDouble(args.get(0))));
             }
         });
 
@@ -1051,8 +1061,28 @@ public class BuiltinFunctions {
         return functions.get(name);
     }
 
+    /** The 32-bit integer envelope for integer-producing builtins (spec v0.13.0). */
+    static int intResult(double d) {
+        if (d < Integer.MIN_VALUE || d > Integer.MAX_VALUE) {
+            throw new ProperTeeError("Runtime Error: Integer overflow");
+        }
+        return (int) d;
+    }
+
     public void register(String name, BuiltinFunction func) {
-        functions.put(name, func);
+        functions.put(requireReplaceableName(name), func);
+    }
+
+    /**
+     * Interpreter-dispatched names cannot be replaced by host registrations — registering one is a
+     * host-API error (spec v0.13.0; previously PRINT/SLEEP were implementation-defined).
+     */
+    static String requireReplaceableName(String name) {
+        if ("PRINT".equals(name) || "SLEEP".equals(name) || "FAIL".equals(name) || "UNWRAP".equals(name)) {
+            throw new IllegalArgumentException("Cannot register an external function named '" + name
+                    + "': interpreter-dispatched names (PRINT, SLEEP, FAIL, UNWRAP) cannot be replaced");
+        }
+        return name;
     }
 
     /**
@@ -1102,7 +1132,7 @@ public class BuiltinFunctions {
     // Used by registerDefaults() for core built-ins.
 
     private void registerResult(String name, final BuiltinFunction func) {
-        functions.put(name, new BuiltinFunction() {
+        functions.put(requireReplaceableName(name), new BuiltinFunction() {
             @Override
             public Object call(java.util.List<Object> args) {
                 try {
@@ -1304,7 +1334,7 @@ public class BuiltinFunctions {
 
     private void registerResultAsync(final String name, final BuiltinFunction func, final long timeoutMs,
                                       final boolean cacheEnabled) {
-        functions.put(name, new BuiltinFunction() {
+        functions.put(requireReplaceableName(name), new BuiltinFunction() {
             @Override
             public Object call(List<Object> args) {
                 if (interpreter == null || interpreter.activeThread == null) {

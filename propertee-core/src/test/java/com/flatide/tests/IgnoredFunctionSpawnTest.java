@@ -65,14 +65,23 @@ public class IgnoredFunctionSpawnTest {
     }
 
     @Test
-    public void spawnOfIgnoredUserFunctionIsBlocked() {
-        try {
-            run(SCRIPT, new HashSet<String>(Arrays.asList("foo")));
-            Assert.fail("expected the ignored function to be blocked in the thread spawn");
-        } catch (RuntimeException e) {
-            Assert.assertTrue("message: " + e.getMessage(),
-                e.getMessage().contains("'foo' is not available in this environment"));
-        }
+    public void spawnOfIgnoredUserFunctionFailsThatWorkerOnly() {
+        // Spec v0.13.0: the blocked spawn is contained in the worker — the run completes, the
+        // worker's Result is an error carrying the positioned message. (1.5.1 briefly failed the
+        // whole run here; v0.13.0 pinned worker containment, matching every other worker error.)
+        String out = run(
+            "function foo() do\n" +
+            "    return 1\n" +
+            "end\n" +
+            "multi r do\n" +
+            "    thread a: foo()\n" +
+            "end\n" +
+            "PRINT(r.a.ok)\n" +
+            "PRINT(r.a.value)\n",
+            new HashSet<String>(Arrays.asList("foo")));
+        Assert.assertTrue("worker result is an error: " + out, out.contains("false"));
+        Assert.assertTrue("message is positioned and names the function: " + out,
+            out.contains("'foo' is not available in this environment"));
     }
 
     @Test
