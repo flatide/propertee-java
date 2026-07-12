@@ -10,7 +10,7 @@ dependencies {
 }
 
 application {
-    mainClass = 'com.flatide.cli.Main'
+    mainClass = 'com.flatide.propertee.cli.Main'
 }
 
 run {
@@ -39,7 +39,7 @@ task jar7(type: Jar) {
     archiveBaseName = 'propertee-java'
     archiveClassifier = 'java7'
     manifest {
-        attributes 'Main-Class': 'com.flatide.cli.Main'
+        attributes 'Main-Class': 'com.flatide.propertee.cli.Main'
     }
     from compileJava7.destinationDirectory
     from project(':propertee-core').tasks.named('compileJava7').get().destinationDirectory
@@ -54,7 +54,7 @@ task jar8(type: Jar) {
     archiveBaseName = 'propertee-java'
     archiveClassifier = 'java8'
     manifest {
-        attributes 'Main-Class': 'com.flatide.cli.Main'
+        attributes 'Main-Class': 'com.flatide.propertee.cli.Main'
     }
     from sourceSets.main.output
     from project(':propertee-core').sourceSets.main.output

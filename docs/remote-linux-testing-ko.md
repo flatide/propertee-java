@@ -31,7 +31,7 @@ scripts/remote-linux-test.sh user@linux-host
 
 기본 원격 테스트 커맨드:
 ```bash
-./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest.testScript[79_task_cancel] --tests com.flatide.tests.TaskEngineTest
+./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest.testScript[79_task_cancel] --tests com.flatide.propertee.tests.TaskEngineTest
 ```
 
 전체 core 회귀로 넓히려면:
@@ -41,7 +41,7 @@ REMOTE_TEST_PROFILE=all-core scripts/remote-linux-test.sh user@linux-host
 
 `79_task_cancel`만 빠르게 확인하려면:
 ```bash
-REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest.testScript[79_task_cancel]' \
+REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest.testScript[79_task_cancel]' \
 scripts/remote-linux-test.sh user@linux-host
 ```
 

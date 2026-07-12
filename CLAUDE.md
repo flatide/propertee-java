@@ -64,10 +64,10 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./gradlew test
 
 # Run a single script test by name (parameterized test filter)
-./gradlew :propertee-core:test --tests "com.flatide.tests.ScriptTest.testScript[09_functions]"
+./gradlew :propertee-core:test --tests "com.flatide.propertee.tests.ScriptTest.testScript[09_functions]"
 
 # Run only TaskEngine tests
-./gradlew :propertee-core:test --tests "com.flatide.tests.TaskEngineTest"
+./gradlew :propertee-core:test --tests "com.flatide.propertee.tests.TaskEngineTest"
 
 # Run all tests via shell script (compares JAR output against .expected files)
 ./test_all.sh
@@ -134,19 +134,19 @@ Single-threaded scripts are unaffected by 1–3 (nothing else needs to run). Clo
 
 | Package | Role |
 |---|---|
-| `com.flatide.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1800 lines), built-in functions, scope management, function definitions |
-| `com.flatide.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
-| `com.flatide.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
-| `com.flatide.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
-| `com.flatide.task` | TaskRunner interface, DefaultTaskRunner (lightweight in-memory), deprecated TaskEngine. Task/TaskInfo/TaskObservation models, TaskStatus enum |
-| `com.flatide.platform` | PlatformProvider interface for host-gated OS access (file I/O, ENV). DefaultPlatformProvider (unrestricted), UnsupportedPlatformProvider (rejects all) |
-| `com.flatide.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
+| `com.flatide.propertee.interpreter` | Core interpreter (`ProperTeeInterpreter.java` ~1800 lines), built-in functions, scope management, function definitions |
+| `com.flatide.propertee.stepper` | Stepper interface, StepResult, SchedulerCommand — the cooperative multithreading API |
+| `com.flatide.propertee.scheduler` | Round-robin scheduler, ThreadContext, ThreadState — manages thread lifecycle |
+| `com.flatide.propertee.runtime` | Type checking, error types (ProperTeeError, BreakException, ContinueException, ReturnException), Result pattern |
+| `com.flatide.propertee.task` | TaskRunner interface, DefaultTaskRunner (lightweight in-memory), deprecated TaskEngine. Task/TaskInfo/TaskObservation models, TaskStatus enum |
+| `com.flatide.propertee.platform` | PlatformProvider interface for host-gated OS access (file I/O, ENV). DefaultPlatformProvider (unrestricted), UnsupportedPlatformProvider (rejects all) |
+| `com.flatide.propertee.parser` | ANTLR4-generated code (do not edit — regenerated from `propertee-core/grammar/ProperTee.g4`) |
 
 **Application packages:**
 
 | Package | Module | Role |
 |---|---|---|
-| `com.flatide.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
+| `com.flatide.propertee.cli` | `propertee-cli` | CLI entry point (`Main.java`) and interactive REPL (`Repl.java`) |
 
 ### Key Files
 
@@ -293,7 +293,7 @@ BLOCKED → READY                    (async future completed or timed out)
 
 `BreakException`, `ContinueException`, `ReturnException`, and `AsyncPendingException` propagate through stepper chains. Steppers catch these where appropriate: `LoopStepper` catches break/continue (around `child.step()`); a `StatementListStepper` with `catchReturn=true` (top level / function / worker) catches return while `catchReturn=false` (if/loop bodies) lets it unwind to the enclosing function; the statement-list and sub-steppers catch `AsyncPendingException` and return an `AWAIT_ASYNC` command for retry.
 
-## TaskRunner (`com.flatide.task`)
+## TaskRunner (`com.flatide.propertee.task`)
 
 Manages detached shell processes for SHELL() builtin.
 

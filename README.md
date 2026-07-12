@@ -162,11 +162,11 @@ Both JARs are fat JARs containing all dependencies. Drop one into your `lib/` or
 The interpreter can be invoked directly from Java code in four steps:
 
 ```java
-import com.flatide.cli.Main;
-import com.flatide.interpreter.ProperTeeInterpreter;
-import com.flatide.interpreter.BuiltinFunctions;
-import com.flatide.scheduler.Scheduler;
-import com.flatide.stepper.Stepper;
+import com.flatide.propertee.cli.Main;
+import com.flatide.propertee.interpreter.ProperTeeInterpreter;
+import com.flatide.propertee.interpreter.BuiltinFunctions;
+import com.flatide.propertee.scheduler.Scheduler;
+import com.flatide.propertee.stepper.Stepper;
 import org.antlr.v4.runtime.*;
 
 import java.util.*;
@@ -220,8 +220,8 @@ Map<String, Object> vars = interpreter.variables;
 Scripts can use file I/O and environment variable functions when the host provides a `PlatformProvider`:
 
 ```java
-import com.flatide.platform.DefaultPlatformProvider;
-import com.flatide.platform.PlatformProvider;
+import com.flatide.propertee.platform.DefaultPlatformProvider;
+import com.flatide.propertee.platform.PlatformProvider;
 
 // Unrestricted access (CLI mode)
 BuiltinFunctions builtins = new BuiltinFunctions(stdout, stderr, null, null, new DefaultPlatformProvider());
