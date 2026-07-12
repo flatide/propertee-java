@@ -1,10 +1,21 @@
-# ProperTee for Java v1.6.0
+# ProperTee for Java v1.7.0
 
 A Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language using ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** with round-robin scheduling.
 
 For language specification, syntax reference, and built-in functions, see the [ProperTee Language Home](https://github.com/flatide/ProperTee). For detailed runtime semantics (types, scoping, operators, threading), see [LANGUAGE.md](LANGUAGE.md). See the [Changelog](LANGUAGE.md#changelog) for what's new.
 
 **Runtime compatibility:** Java 7+ (no lambdas, no streams, no Java 8 APIs)
+
+> **⚠️ 1.7.0 is host-API breaking: every package moved from `com.flatide.*` to `com.flatide.propertee.*`.**
+> The old packages (`com.flatide.interpreter`, `com.flatide.scheduler`, `com.flatide.task`, …) are
+> gone from the jar — 1.6.x host code is not source- or binary-compatible. Language semantics,
+> class names, behavior, and the stepper/host API are otherwise identical; migration is mechanical:
+> replace `import com.flatide.X` with `import com.flatide.propertee.X` (the CLI main class is now
+> `com.flatide.propertee.cli.Main`). This was an ecosystem-wide namespace decision — the modern
+> runtime (propertee2-java) took `com.flatide.propertee2.*` in its 0.15.0. A strict SemVer reading
+> would call this a major bump; the 1.x line deliberately keeps its number (the "2" identity belongs
+> to the modern runtime) and carries this notice instead. Hosts that cannot migrate yet should stay
+> on 1.6.0.
 
 ## Quick Start
 

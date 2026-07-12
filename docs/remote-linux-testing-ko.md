@@ -20,9 +20,9 @@
 
 기본 profile:
 - `linux-regression`
-- 포함:
-  - `ScriptTest.testScript[79_task_cancel]`
-  - `TaskEngineTest`
+- 포함: `ScriptTest` 전체 픽스처 스위트(`79_task_cancel` 포함, 수 초 소요)
+
+  참고: 단일 픽스처만 고르는 `--tests "...testScript[79_task_cancel]"` 형식은 Gradle 9.3.1의 `--tests`가 파라미터 표시명을 매치하지 못해 동작하지 않는다(클래스 단위로 실행). `TaskEngineTest`는 플랫폼 태스크 러너가 core에서 제거될 때 함께 삭제된 클래스 — 더 이상 존재하지 않음.
 
 기본 실행 명령:
 ```bash
@@ -31,7 +31,7 @@ scripts/remote-linux-test.sh user@linux-host
 
 기본 원격 테스트 커맨드:
 ```bash
-./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest.testScript[79_task_cancel] --tests com.flatide.propertee.tests.TaskEngineTest
+./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest
 ```
 
 전체 core 회귀로 넓히려면:
@@ -39,9 +39,9 @@ scripts/remote-linux-test.sh user@linux-host
 REMOTE_TEST_PROFILE=all-core scripts/remote-linux-test.sh user@linux-host
 ```
 
-`79_task_cancel`만 빠르게 확인하려면:
+회귀 범위를 `ScriptTest` 스위트로만 좁히려면:
 ```bash
-REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest.testScript[79_task_cancel]' \
+REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest' \
 scripts/remote-linux-test.sh user@linux-host
 ```
 
@@ -93,7 +93,7 @@ scripts/remote-teebox-smoke.sh journey@192.168.1.107
 ## 권장 운영 방식
 - 빠른 회귀 확인: `remote-linux-test.sh`
 - 배포본 기동 확인: `remote-teebox-smoke.sh`
-- `79_task_cancel`, `TaskEngineTest`, TeeBox smoke를 내부망 Linux에서 정기적으로 확인
+- `79_task_cancel`과 TeeBox smoke를 내부망 Linux에서 정기적으로 확인
 
 ## 제한
 - 현재는 SSH 기반 ad-hoc 실행이다.

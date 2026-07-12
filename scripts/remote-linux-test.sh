@@ -8,8 +8,8 @@ Usage:
 
 Environment:
   REMOTE_TEST_PROFILE Default: linux-regression
-                    - linux-regression: ScriptTest 79_task_cancel + TaskEngineTest
-                    - all-core: full ScriptTest + TaskEngineTest
+                    - linux-regression: the full ScriptTest fixture suite (includes 79_task_cancel)
+                    - all-core: the whole com.flatide.propertee.tests suite
   REMOTE_TEST_CMD   Remote command to execute after upload.
                     Overrides REMOTE_TEST_PROFILE when set.
   REMOTE_SSH_KEY    Identity file for ssh/scp.
@@ -21,7 +21,7 @@ Examples:
   scripts/remote-linux-test.sh user@linux-host
   REMOTE_TEST_PROFILE=all-core \
     scripts/remote-linux-test.sh user@linux-host /tmp/propertee-ci
-  REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest.testScript[79_task_cancel]' \
+  REMOTE_TEST_CMD='./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest' \
     scripts/remote-linux-test.sh user@linux-host /tmp/propertee-ci
 EOF
 }
@@ -48,10 +48,10 @@ REMOTE_TEST_PROFILE="${REMOTE_TEST_PROFILE:-linux-regression}"
 default_test_command() {
     case "$REMOTE_TEST_PROFILE" in
         linux-regression)
-            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest.testScript[79_task_cancel] --tests com.flatide.tests.TaskEngineTest"
+            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.flatide.propertee.tests.ScriptTest"
             ;;
         all-core)
-            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests com.flatide.tests.ScriptTest --tests com.flatide.tests.TaskEngineTest"
+            printf '%s' "./gradlew --no-daemon :propertee-core:test --tests 'com.flatide.propertee.tests.*'"
             ;;
         *)
             echo "Unknown REMOTE_TEST_PROFILE: $REMOTE_TEST_PROFILE" >&2

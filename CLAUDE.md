@@ -2,11 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is (v1.6.0)
+## What This Is (v1.7.0)
 
 ProperTee Java is a Java implementation of the [ProperTee](https://github.com/flatide/ProperTee) language. It uses ANTLR4 for parsing and a **Stepper interface pattern for cooperative multithreading** (replacing the JavaScript generator-based approach from [propertee-js](https://github.com/flatide/propertee-js)). Every statement visitor produces a Stepper object; a central scheduler round-robins between threads at statement boundaries.
 
-> **The Java 7/8-compatible line for the legacy expression-evaluator server** (restricted grammar, expression-centric use). Policy (revised 2026-07): **language-spec syncs + security/critical bug fixes; no runtime-architecture features.** The 1.x line tracks the canonical ProperTee spec — **v1.6.0 implements spec v0.7.0–v0.13.0** (strict boolean conditions, short-circuit `and`/`or`, `RANDOM`/`SLICE`/`LEN` cleanups, first-class `null` as `runtime.TeeNull`, `elseif`, and the v0.10.0 Result-escalation batch: `FAIL`/`UNWRAP`/`OK`/`ERR`/`IS_RESULT` + the genuine-Result origin `runtime.TeeResult`, and the v0.11.0 pinned name resolution: script-defined functions now shadow built-ins/externals — `visitFunctionCall` checks `userDefinedFunctions` first since 1.3.0, and the v0.12.0 reserved namespace: all-uppercase function definitions are a definition-time error since 1.4.0, and the v0.13.0 integer envelope: 32-bit range pinned — overflowing arithmetic and out-of-range literals are runtime errors, FLOOR/CEIL/ROUND/ABS stop promoting, blocked thread-spawns are worker-contained, and PRINT/SLEEP/FAIL/UNWRAP host registrations are rejected since 1.6.0) with language semantics only; the stepper model, host API, and Java 7+ compatibility are untouched. (1.5.0 adds `ProperTeeInterpreter.validate(tree)` — the opt-in static validation pass for host restrictions, ProperTee #9, under the security exception; no language change.) Spec batches are breaking for scripts — the last pre-sync release stays available as the `v1.0.0` tag (the legacy server pins it until its scripts are migrated). Runtime-feature requests still go to the modern runtime. Active development of the fully-cooperative runtime (Strategy B — virtual-thread coroutines, **Java 25 LTS** baseline) continues in a **separate project** consumed by TeeBox; the two lines are not kept in sync (one frozen, one active). Design: `docs/java25-vthread-runtime-design-ko.md`. See "Remaining eager seams" below for what Strategy B resolves.
+> **The Java 7/8-compatible line for the legacy expression-evaluator server** (restricted grammar, expression-centric use). Policy (revised 2026-07): **language-spec syncs + security/critical bug fixes; no runtime-architecture features.** The 1.x line tracks the canonical ProperTee spec — **v1.6.0 implements spec v0.7.0–v0.13.0** (strict boolean conditions, short-circuit `and`/`or`, `RANDOM`/`SLICE`/`LEN` cleanups, first-class `null` as `runtime.TeeNull`, `elseif`, and the v0.10.0 Result-escalation batch: `FAIL`/`UNWRAP`/`OK`/`ERR`/`IS_RESULT` + the genuine-Result origin `runtime.TeeResult`, and the v0.11.0 pinned name resolution: script-defined functions now shadow built-ins/externals — `visitFunctionCall` checks `userDefinedFunctions` first since 1.3.0, and the v0.12.0 reserved namespace: all-uppercase function definitions are a definition-time error since 1.4.0, and the v0.13.0 integer envelope: 32-bit range pinned — overflowing arithmetic and out-of-range literals are runtime errors, FLOOR/CEIL/ROUND/ABS stop promoting, blocked thread-spawns are worker-contained, and PRINT/SLEEP/FAIL/UNWRAP host registrations are rejected since 1.6.0) with language semantics only; the stepper model, host API, and Java 7+ compatibility are untouched — with one user-decided exception: **v1.7.0 renamed every package from `com.flatide.*` to `com.flatide.propertee.*`** (namespace hygiene, ecosystem-wide — propertee2-java took `com.flatide.propertee2.*` in its 0.15.0). That release is **host-API breaking** (the old packages are gone from the jar, no shim); language/behavior unchanged (108+1 fixtures byte-identical, 134 tests green), migration is a mechanical import substitution (`com.flatide.X` → `com.flatide.propertee.X`; CLI main class `com.flatide.propertee.cli.Main`), and hosts that cannot migrate stay on 1.6.0. (1.5.0 adds `ProperTeeInterpreter.validate(tree)` — the opt-in static validation pass for host restrictions, ProperTee #9, under the security exception; no language change.) Spec batches are breaking for scripts — the last pre-sync release stays available as the `v1.0.0` tag (the legacy server pins it until its scripts are migrated). Runtime-feature requests still go to the modern runtime. Active development of the fully-cooperative runtime (Strategy B — virtual-thread coroutines, **Java 25 LTS** baseline) continues in a **separate project** consumed by TeeBox; the two lines are not kept in sync (one frozen, one active). Design: `docs/java25-vthread-runtime-design-ko.md`. See "Remaining eager seams" below for what Strategy B resolves.
 
 ## Project Structure
 
@@ -28,7 +28,7 @@ Source layout: `propertee-{module}/src/main/java/com/flatide/{package}/`. Gramma
 # Individual steps:
 ./gradlew generateGrammarSource   # regenerate parser/lexer/visitor from grammar
 ./gradlew classes                 # compile all Java sources
-./gradlew test                    # run JUnit tests (ScriptTest + TaskEngineTest)
+./gradlew test                    # run JUnit tests (the com.flatide.propertee.tests suite)
 
 # CLI fat JARs:
 ./gradlew jar7                    # Java 7 fat JAR → build/libs/propertee-java-java7.jar
@@ -67,7 +67,7 @@ REPL commands: `.vars` (show variables), `.exit` (quit). Multi-line blocks are a
 ./gradlew :propertee-core:test --tests "com.flatide.propertee.tests.ScriptTest.testScript[09_functions]"
 
 # Run only TaskEngine tests
-./gradlew :propertee-core:test --tests "com.flatide.propertee.tests.TaskEngineTest"
+./gradlew :propertee-core:test --tests "com.flatide.propertee.tests.ValidatorTest"
 
 # Run all tests via shell script (compares JAR output against .expected files)
 ./test_all.sh
