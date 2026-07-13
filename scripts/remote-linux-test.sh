@@ -8,7 +8,7 @@ Usage:
 
 Environment:
   REMOTE_TEST_PROFILE Default: linux-regression
-                    - linux-regression: the full ScriptTest fixture suite (includes 79_task_cancel)
+                    - linux-regression: the full ScriptTest fixture suite (includes the SHELL task fixtures 72/78/80)
                     - all-core: the whole com.flatide.propertee.tests suite
   REMOTE_TEST_CMD   Remote command to execute after upload.
                     Overrides REMOTE_TEST_PROFILE when set.

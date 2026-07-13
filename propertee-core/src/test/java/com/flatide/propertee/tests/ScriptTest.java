@@ -95,7 +95,6 @@ public class ScriptTest {
             "76_range_tiny_float_bound",
             "77_range_int_overflow",
             "78_task_basic",
-            "79_task_cancel",
             "80_task_unique_ids",
             "81_string_matching",
             "82_map_extensions",
@@ -126,7 +125,10 @@ public class ScriptTest {
             InputStream ptStream = ScriptTest.class.getResourceAsStream(resourceBase + name + ".tee");
             InputStream expStream = ScriptTest.class.getResourceAsStream(resourceBase + name + ".expected");
 
-            if (ptStream == null || expStream == null) continue;
+            if (ptStream == null || expStream == null) {
+                // A listed fixture missing from the classpath is a build defect, not a skip
+                throw new IllegalStateException("fixture resource missing on classpath: " + name);
+            }
 
             String script = readStream(ptStream);
             String expected = readStream(expStream);

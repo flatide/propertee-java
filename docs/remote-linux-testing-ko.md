@@ -20,9 +20,9 @@
 
 기본 profile:
 - `linux-regression`
-- 포함: `ScriptTest` 전체 픽스처 스위트(`79_task_cancel` 포함, 수 초 소요)
+- 포함: `ScriptTest` 전체 픽스처 스위트(SHELL 태스크 픽스처 `72_shell`/`78_task_basic`/`80_task_unique_ids` 포함, 수 초 소요)
 
-  참고: 단일 픽스처만 고르는 `--tests "...testScript[79_task_cancel]"` 형식은 Gradle 9.3.1의 `--tests`가 파라미터 표시명을 매치하지 못해 동작하지 않는다(클래스 단위로 실행). `TaskEngineTest`는 플랫폼 태스크 러너가 core에서 제거될 때 함께 삭제된 클래스 — 더 이상 존재하지 않음.
+  참고: 단일 픽스처만 고르는 `--tests "...testScript[NN_name]"` 형식은 Gradle 9.3.1의 `--tests`가 파라미터 표시명을 매치하지 못해 동작하지 않는다(클래스 단위로 실행). 과거 이 문서가 지시하던 `79_task_cancel` 픽스처는 START_TASK 계열 제거(d71f35c) 때, `TaskEngineTest` 클래스는 플랫폼 태스크 러너의 core 제거(e6b5880) 때 각각 삭제되어 더 이상 존재하지 않는다.
 
 기본 실행 명령:
 ```bash
@@ -93,7 +93,7 @@ scripts/remote-teebox-smoke.sh journey@192.168.1.107
 ## 권장 운영 방식
 - 빠른 회귀 확인: `remote-linux-test.sh`
 - 배포본 기동 확인: `remote-teebox-smoke.sh`
-- `79_task_cancel`과 TeeBox smoke를 내부망 Linux에서 정기적으로 확인
+- `ScriptTest` 스위트(SHELL 태스크 픽스처 포함)와 TeeBox smoke를 내부망 Linux에서 정기적으로 확인
 
 ## 제한
 - 현재는 SSH 기반 ad-hoc 실행이다.
